@@ -26,6 +26,7 @@ keywords = ["protein", "structure prediction", "BV-BRC", "Boltz", "Chai", "Alpha
 dependencies = [
     "click>=8.0",
     "biopython>=1.80",
+    "numpy>=1.23",
     "pandas>=1.5",
 ]
 

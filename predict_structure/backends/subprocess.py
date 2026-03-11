@@ -1,0 +1,51 @@
+"""Subprocess execution backend for local tool invocation."""
+
+from __future__ import annotations
+
+import logging
+import os
+import subprocess
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+class SubprocessBackend:
+    """Run prediction commands as local subprocesses.
+
+    Use when the prediction tool is installed locally (inside a container,
+    conda env, or system-wide). Streams stdout/stderr to the terminal.
+    """
+
+    def run(
+        self,
+        command: list[str],
+        *,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        timeout: int | None = None,
+        **kwargs,
+    ) -> int:
+        """Execute a command as a local subprocess.
+
+        Args:
+            command: CLI command as list of strings.
+            cwd: Working directory for the subprocess.
+            env: Environment variables (merged with os.environ).
+            timeout: Max seconds before killing the process.
+
+        Returns:
+            Exit code (0 = success).
+        """
+        run_env = None
+        if env:
+            run_env = {**os.environ, **env}
+
+        logger.info("Running: %s", " ".join(command))
+        result = subprocess.run(
+            command,
+            cwd=cwd,
+            env=run_env,
+            timeout=timeout,
+        )
+        return result.returncode
