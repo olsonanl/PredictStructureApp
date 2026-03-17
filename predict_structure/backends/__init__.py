@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
+from predict_structure.backends.cwl import CWLBackend
 from predict_structure.backends.docker import DockerBackend
 from predict_structure.backends.subprocess import SubprocessBackend
 
 BACKENDS: dict[str, type] = {
     "docker": DockerBackend,
     "subprocess": SubprocessBackend,
+    "cwl": CWLBackend,
 }
 
 
-def get_backend(name: str, **kwargs) -> DockerBackend | SubprocessBackend:
+def get_backend(name: str, **kwargs) -> DockerBackend | SubprocessBackend | CWLBackend:
     """Return a backend instance by name.
 
     Args:
-        name: "docker" or "subprocess".
+        name: "docker", "subprocess", or "cwl".
         **kwargs: Passed to backend constructor (e.g., default_image for Docker).
 
     Returns:
@@ -30,4 +32,4 @@ def get_backend(name: str, **kwargs) -> DockerBackend | SubprocessBackend:
     return cls(**kwargs)
 
 
-__all__ = ["DockerBackend", "SubprocessBackend", "BACKENDS", "get_backend"]
+__all__ = ["CWLBackend", "DockerBackend", "SubprocessBackend", "BACKENDS", "get_backend"]

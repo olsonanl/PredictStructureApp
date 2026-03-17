@@ -1,0 +1,6 @@
+tool: alphafold
+input_file:
+  class: File
+  path: ../../test_data/simple_protein.fasta
+output_dir: output
+device: gpu

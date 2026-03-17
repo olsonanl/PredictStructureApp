@@ -32,7 +32,7 @@ PredictStructureApp does NOT bundle all tools into a single Docker image. Instea
 ## Key Components
 
 - **predict_structure/**: Python package with unified CLI, adapters, converters, and backends
-  - `cli.py`: click-based CLI entry point (`predict-structure <tool> <input>`)
+  - `cli.py`: click-based CLI entry point (`predict-structure <tool> <input> [OPTIONS]`), uses click.group() with per-tool subcommands
   - `adapters/base.py`: Abstract adapter class (prepare_input, build_command, run, normalize_output)
   - `adapters/boltz.py`: FASTA→YAML conversion, --diffusion_samples mapping, mmCIF→PDB
   - `adapters/chai.py`: FASTA pass-through, A3M→Parquet MSA conversion
@@ -47,22 +47,55 @@ PredictStructureApp does NOT bundle all tools into a single Docker image. Instea
 - **cwl/**: CWL tool and workflow definitions
 - **container/**: Dockerfile for BV-BRC integration layer
 
-## Unified Parameter Mapping
+## CLI Structure
 
-| Unified CLI Flag | Boltz-2 | Chai-1 | AlphaFold 2 | ESMFold (HF) |
-|------------------|---------|--------|-------------|---------------|
-| `<tool>` | `boltz predict` | `chai fold` | `run_alphafold.py` | `esm-fold-hf` |
-| `<input>` | INPUT_PATH (.yaml) | `--fasta` | `--fasta_paths` | `-i` (.fasta) |
+The CLI uses `click.group()` with per-tool subcommands. Each subcommand has shared options (common to all tools) plus tool-specific options.
+
+### Shared Options (all subcommands)
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `<input>` | file | FASTA file (or Boltz YAML) |
+| `--output-dir, -o` | path | Output directory (required) |
+| `--num-samples, -n` | int | Number of structure samples |
+| `--num-recycles` | int | Recycling iterations |
+| `--seed` | int | Random seed |
+| `--device` | enum | `gpu` or `cpu` |
+| `--msa` | path | MSA file (.a3m, .sto, .pqt) |
+| `--output-format` | enum | `pdb` or `mmcif` |
+| `--backend` | enum | `subprocess`, `docker`, or `cwl` |
+| `--image` | str | Override Docker image (docker backend only) |
+| `--cwl-runner` | str | CWL runner command (cwl backend only) |
+| `--cwl-tool` | str | CWL tool definition path (cwl backend only) |
+| `--debug` | flag | Print command instead of executing |
+
+### Tool-Specific Options
+
+| Subcommand | Option | Description |
+|------------|--------|-------------|
+| `boltz` | `--sampling-steps` | Diffusion sampling steps |
+| `boltz` | `--use-msa-server` | Use remote MSA server |
+| `boltz` | `--use-potentials` | Enable potential terms |
+| `chai` | `--sampling-steps` | Diffusion sampling steps |
+| `chai` | `--use-msa-server` | Use remote MSA server |
+| `alphafold` | `--af2-data-dir` | Database directory (required) |
+| `alphafold` | `--af2-model-preset` | Model preset |
+| `alphafold` | `--af2-db-preset` | DB preset |
+| `alphafold` | `--af2-max-template-date` | Max template date |
+| `esmfold` | `--fp16` | Half-precision inference |
+| `esmfold` | `--chunk-size` | Chunk size for long sequences |
+| `esmfold` | `--max-tokens-per-batch` | Max tokens per batch |
+
+### Parameter Mapping (shared → native)
+
+| Shared Flag | Boltz-2 | Chai-1 | AlphaFold 2 | ESMFold (HF) |
+|-------------|---------|--------|-------------|---------------|
 | `--output-dir` | `--out_dir` | `output_dir` | `--output_dir` | `-o` |
 | `--num-samples` | `--diffusion_samples` | `--num-diffn-samples` | N/A | N/A |
 | `--num-recycles` | `--recycling_steps` | `--num-trunk-recycles` | implicit | `--num-recycles` |
 | `--seed` | N/A | `--seed` | `--random_seed` | N/A |
 | `--device` | `--accelerator` | `--device` | implicit | `--cpu-only` |
 | `--msa` | inject into YAML | `--msa-file` (a3m→pqt) | `--msa_dir` | ignored |
-| `--boltz-*` | pass-through | - | - | - |
-| `--chai-*` | - | pass-through | - | - |
-| `--af2-*` | - | - | pass-through | - |
-| `--esm-*` | - | - | - | pass-through |
 
 ## Building and Running
 
@@ -72,13 +105,18 @@ PredictStructureApp does NOT bundle all tools into a single Docker image. Instea
 # Install
 pip install -e .
 
-# Run prediction
-predict-structure boltz input.fasta -o output/ --num-samples 5
-predict-structure esmfold input.fasta -o output/ --num-recycles 4
+# Run prediction (each tool is a subcommand with its own options)
+predict-structure boltz input.fasta -o output/ --num-samples 5 --use-potentials
+predict-structure esmfold input.fasta -o output/ --num-recycles 4 --fp16
 predict-structure chai input.fasta -o output/ --msa alignment.a3m
+predict-structure alphafold input.fasta -o output/ --af2-data-dir /data/alphafold
 
-# Pass-through tool-specific flags
-predict-structure boltz input.yaml -o output/ --boltz-use-potentials
+# Debug mode (print command without executing)
+predict-structure esmfold input.fasta -o output/ --debug
+
+# Per-tool help
+predict-structure boltz --help
+predict-structure esmfold --help
 ```
 
 ### BV-BRC Service
@@ -173,4 +211,4 @@ ESMFold can run on CPU (no GPU policy needed in preflight).
 - **ESMFold uses HuggingFace**: `transformers` + `torch`, NOT legacy OpenFold-based `esm-fold`
 - **Output B-factors**: 0-1 range (not crystallographic 0-100)
 - **A3M is MSA lingua franca**: Auto-converted to Parquet for Chai, injected into YAML for Boltz
-- **Pass-through flags**: `--boltz-*`, `--chai-*`, `--af2-*`, `--esm-*` forwarded to native tools
+- **Subcommand pattern**: CLI uses click.group() — tool-specific options are explicit on each subcommand, not generic pass-through
