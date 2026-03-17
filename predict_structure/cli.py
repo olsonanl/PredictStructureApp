@@ -31,27 +31,39 @@ from predict_structure.normalizers import write_metadata_json
 # ---------------------------------------------------------------------------
 
 def shared_options(func):
-    """Decorator that applies options common to all prediction tools."""
+    """Decorator that applies options common to all prediction tools.
+
+    Help order (top to bottom): Global options, [Tool options], Execution options.
+    Click decorators stack bottom-up, so Execution is applied last (via backend_options).
+    """
     @click.argument("input_file", type=click.Path(exists=True))
-    @optgroup.group("Prediction options")
+    @optgroup.group("Global options")
     @optgroup.option("-o", "--output-dir", type=click.Path(), required=True, help="Output directory")
     @optgroup.option("--num-samples", "-n", type=int, default=1, help="Number of structure samples")
     @optgroup.option("--num-recycles", type=int, default=3, help="Recycling iterations")
     @optgroup.option("--seed", type=int, default=None, help="Random seed")
-    @optgroup.option("--device", type=click.Choice(["gpu", "cpu"]), default="gpu", help="Compute device")
     @optgroup.option("--msa", type=click.Path(), default=None, help="MSA file (.a3m, .sto, .pqt)")
     @optgroup.option("--output-format", type=click.Choice(["pdb", "mmcif"]), default="pdb")
-    @optgroup.group("Backend options")
+    @click.option("--debug", is_flag=True, default=False, help="Print the command instead of executing it")
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+    return wrapper
+
+
+def backend_options(func):
+    """Decorator that applies execution/backend options (shown last in help)."""
+    @optgroup.group("Execution options")
     @optgroup.option(
         "--backend",
         type=click.Choice(["docker", "subprocess", "cwl"]),
         default="subprocess",
         help="Execution backend",
     )
+    @optgroup.option("--device", type=click.Choice(["gpu", "cpu"]), default="gpu", help="Compute device")
     @optgroup.option("--image", default=None, help="Override Docker image (docker backend only)")
     @optgroup.option("--cwl-runner", default=None, help="CWL runner command (default: cwltool)")
     @optgroup.option("--cwl-tool", default=None, help="Path to CWL tool definition")
-    @click.option("--debug", is_flag=True, default=False, help="Print the command instead of executing it")
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
@@ -161,6 +173,7 @@ def main():
 @optgroup.option("--sampling-steps", type=int, default=200, help="Number of diffusion sampling steps")
 @optgroup.option("--use-msa-server", is_flag=True, default=False, help="Use remote MSA server")
 @optgroup.option("--use-potentials", is_flag=True, default=False, help="Enable potential terms")
+@backend_options
 def boltz(input_file, sampling_steps, use_msa_server, use_potentials, **shared):
     """Predict structure with Boltz-2 (diffusion-based, proteins/DNA/RNA/ligands)."""
     extra = {
@@ -180,6 +193,7 @@ def boltz(input_file, sampling_steps, use_msa_server, use_potentials, **shared):
 @optgroup.group("Chai-1 options")
 @optgroup.option("--sampling-steps", type=int, default=200, help="Number of diffusion sampling steps")
 @optgroup.option("--use-msa-server", is_flag=True, default=False, help="Use remote MSA server")
+@backend_options
 def chai(input_file, sampling_steps, use_msa_server, **shared):
     """Predict structure with Chai-1 (diffusion-based protein prediction)."""
     extra = {
@@ -200,6 +214,7 @@ def chai(input_file, sampling_steps, use_msa_server, **shared):
 @optgroup.option("--af2-model-preset", default="monomer", help="Model preset (monomer, monomer_casp14, multimer)")
 @optgroup.option("--af2-db-preset", default="reduced_dbs", help="DB preset (reduced_dbs, full_dbs)")
 @optgroup.option("--af2-max-template-date", default="2022-01-01", help="Max template date (YYYY-MM-DD)")
+@backend_options
 def alphafold(input_file, af2_data_dir, af2_model_preset, af2_db_preset, af2_max_template_date, **shared):
     """Predict structure with AlphaFold 2 (MSA-based, high accuracy)."""
     extra = {
@@ -221,6 +236,7 @@ def alphafold(input_file, af2_data_dir, af2_model_preset, af2_db_preset, af2_max
 @optgroup.option("--fp16", is_flag=True, default=False, help="Use half-precision (FP16) inference")
 @optgroup.option("--chunk-size", type=int, default=None, help="Chunk size for long sequences")
 @optgroup.option("--max-tokens-per-batch", type=int, default=None, help="Max tokens per batch")
+@backend_options
 def esmfold(input_file, fp16, chunk_size, max_tokens_per_batch, **shared):
     """Predict structure with ESMFold (single-sequence, no MSA needed, CPU-capable)."""
     extra = {
