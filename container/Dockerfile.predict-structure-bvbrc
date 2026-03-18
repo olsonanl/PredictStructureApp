@@ -1,0 +1,95 @@
+# BV-BRC Runtime Layer for predict-structure
+#
+# Adds BV-BRC AppService integration (Perl runtime, workspace client)
+# on top of the all-in-one predict-structure image.
+#
+# Build:
+#   docker build --platform linux/amd64 \
+#     -t dxkb/predict-structure-bvbrc:latest-gpu \
+#     -f container/Dockerfile.predict-structure-bvbrc .
+#
+# Run as BV-BRC service:
+#   docker run --gpus all dxkb/predict-structure-bvbrc:latest-gpu \
+#     App-PredictStructure params.json
+#
+# Run CLI directly:
+#   docker run --gpus all -v $(pwd)/data:/input -v $(pwd)/output:/output \
+#     dxkb/predict-structure-bvbrc:latest-gpu \
+#     predict-structure auto /input/protein.fasta -o /output
+
+FROM --platform=linux/amd64 dxkb/predict-structure-all:latest-gpu
+
+LABEL maintainer="BV-BRC Team"
+LABEL description="Unified protein structure prediction with BV-BRC AppService"
+LABEL org.opencontainers.image.source="https://github.com/CEPI-dxkb/PredictStructureApp"
+
+# Copy BV-BRC runtime AND build system from dev_container
+COPY --from=dxkb/dev_container:cuda12-ubuntu22.04 /opt/patric-common /opt/patric-common
+COPY --from=dxkb/dev_container:cuda12-ubuntu22.04 /build/dev_container /build/dev_container
+
+# Standard BV-BRC Environment Variables
+ENV RT=/opt/patric-common/runtime
+ENV KB_DEPLOYMENT=/opt/patric-common/deployment
+ENV KB_TOP=/opt/patric-common/deployment
+ENV PERL5LIB=$KB_DEPLOYMENT/lib:$RT/lib/perl5
+ENV PATH=$KB_DEPLOYMENT/bin:$RT/bin:/usr/local/bin:$PATH
+
+# App-specific environment
+ENV KB_MODULE_DIR=/kb/module
+ENV IN_BVBRC_CONTAINER=1
+
+# Additional BV-BRC modules
+WORKDIR /build/dev_container/modules
+RUN git clone --depth 1 https://github.com/TheSEED/seed_core.git 2>/dev/null || true && \
+    git clone --depth 1 https://github.com/TheSEED/seed_gjo.git 2>/dev/null || true
+
+WORKDIR /build/dev_container
+RUN . ./user-env.sh && \
+    cd modules/seed_core && make -k 2>/dev/null || true && \
+    cd ../seed_gjo && make -k 2>/dev/null || true
+
+RUN for mod in seed_core seed_gjo; do \
+        cp -r modules/$mod/lib/* $KB_DEPLOYMENT/lib/ 2>/dev/null || true; \
+    done
+
+# Install missing CPAN modules
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libssl-dev \
+        zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && $RT/bin/cpanm --notest Net::SSLeay IO::Socket::SSL LWP::Protocol::https REST::Client Class::Accessor Carp::Always \
+    && rm -rf ~/.cpanm
+
+# Create service directories
+RUN mkdir -p /kb/module/service-scripts \
+             /kb/module/app_specs \
+             /kb/module/lib
+
+# Copy app specs and service scripts
+COPY app_specs/ /kb/module/app_specs/
+COPY service-scripts/ /kb/module/service-scripts/
+
+RUN chmod +x /kb/module/service-scripts/*.pl 2>/dev/null || true
+
+WORKDIR /data
+
+# Entrypoint dispatches between BV-BRC service and CLI
+RUN printf '#!/bin/bash\n\
+case "$1" in\n\
+    App-PredictStructure*)\n\
+        exec $RT/bin/perl /kb/module/service-scripts/App-PredictStructure.pl "${@:2}"\n\
+        ;;\n\
+    predict-structure)\n\
+        shift\n\
+        exec predict-structure "$@"\n\
+        ;;\n\
+    bash|sh)\n\
+        exec "$@"\n\
+        ;;\n\
+    *)\n\
+        exec "$@"\n\
+        ;;\n\
+esac\n' > /entrypoint.sh && chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["predict-structure", "--help"]

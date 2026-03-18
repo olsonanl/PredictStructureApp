@@ -1,0 +1,55 @@
+# Dockerfile for predict-structure — unified protein structure prediction CLI
+#
+# This is a lightweight dispatcher image. It installs the predict-structure
+# Python package and CLI but does NOT include the prediction tools themselves.
+# Use with --backend docker (delegates to per-tool containers) or
+# --backend cwl (delegates to CWL runner).
+#
+# For a standalone image with all tools installed, see
+# Dockerfile.predict-structure-all.
+#
+# Build:
+#   docker build -t dxkb/predict-structure:latest \
+#     -f container/Dockerfile.predict-structure .
+#
+# Run:
+#   docker run --rm dxkb/predict-structure:latest --help
+#   docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+#     dxkb/predict-structure:latest boltz input.fasta -o output/ --backend docker
+
+FROM python:3.12-slim
+
+LABEL maintainer="BV-BRC Team"
+LABEL description="Unified protein structure prediction CLI (dispatcher)"
+LABEL org.opencontainers.image.source="https://github.com/CEPI-dxkb/PredictStructureApp"
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# System dependencies for PyYAML, BioPython, pyarrow
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        gcc \
+        g++ \
+        libyaml-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install predict-structure with all optional deps
+WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY predict_structure/ predict_structure/
+
+RUN pip install --no-cache-dir -e ".[all]"
+
+# Copy app specs, CWL definitions, and test data
+COPY app_specs/ /app/app_specs/
+COPY cwl/ /app/cwl/
+COPY test_data/ /app/test_data/
+
+# Create working directories
+RUN mkdir -p /input /output /databases
+
+WORKDIR /data
+
+ENTRYPOINT ["predict-structure"]
+CMD ["--help"]
