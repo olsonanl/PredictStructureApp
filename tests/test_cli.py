@@ -1,7 +1,9 @@
 """Tests for CLI argument parsing and error handling."""
 
+from unittest.mock import patch
+
 from click.testing import CliRunner
-from predict_structure.cli import main
+from predict_structure.cli import main, discover_tool, _is_tool_available
 
 
 class TestCLIGroup:
@@ -189,6 +191,158 @@ class TestSharedOptions:
         runner = CliRunner()
         result = runner.invoke(main, ["boltz", "--help"])
         assert "--image" in result.output
+
+
+class TestAutoSubcommand:
+    """Test the auto-discovery subcommand."""
+
+    def test_help(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["auto", "--help"])
+        assert result.exit_code == 0
+        assert "Auto-discover" in result.output
+        assert "--output-dir" in result.output
+        assert "--backend" in result.output
+        # auto should NOT show tool-specific options
+        assert "--sampling-steps" not in result.output
+        assert "--fp16" not in result.output
+        assert "--af2-data-dir" not in result.output
+
+    def test_auto_shown_in_group_help(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["--help"])
+        assert "auto" in result.output
+
+    @patch("predict_structure.cli.discover_tool", return_value="esmfold")
+    def test_auto_debug_prints_selected_tool(self, mock_discover, sample_fasta, tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "auto", str(sample_fasta), "-o", str(tmp_path / "out"), "--debug",
+        ])
+        assert result.exit_code == 0
+        assert "Auto-selected: esmfold" in result.output
+        assert "esm-fold-hf" in result.output
+
+    @patch("predict_structure.cli.discover_tool", return_value="boltz")
+    def test_auto_debug_boltz(self, mock_discover, sample_fasta, tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "auto", str(sample_fasta), "-o", str(tmp_path / "out"), "--debug",
+        ])
+        assert result.exit_code == 0
+        assert "Auto-selected: boltz" in result.output
+        assert "boltz predict" in result.output
+
+
+class TestToolDiscovery:
+    """Test the discover_tool function."""
+
+    @patch("predict_structure.cli._is_tool_available", side_effect=lambda t: t == "boltz")
+    def test_discovers_boltz_first(self, mock_avail, tmp_path):
+        fasta = tmp_path / "test.fasta"
+        fasta.write_text(">seq\nACDE\n")
+        result = discover_tool(fasta, device="gpu")
+        assert result == "boltz"
+
+    @patch("predict_structure.cli._is_tool_available", side_effect=lambda t: t == "esmfold")
+    def test_cpu_prefers_esmfold(self, mock_avail, tmp_path):
+        fasta = tmp_path / "test.fasta"
+        fasta.write_text(">seq\nACDE\n")
+        result = discover_tool(fasta, device="cpu")
+        assert result == "esmfold"
+
+    @patch("predict_structure.cli._is_tool_available", side_effect=lambda t: t == "boltz")
+    def test_yaml_input_forces_boltz(self, mock_avail, tmp_path):
+        yaml_file = tmp_path / "input.yaml"
+        yaml_file.write_text("sequences:\n  - protein:\n      id: A\n")
+        result = discover_tool(yaml_file, device="gpu")
+        assert result == "boltz"
+
+    @patch("predict_structure.cli._is_tool_available", return_value=False)
+    def test_yaml_input_without_boltz_raises(self, mock_avail, tmp_path):
+        import pytest
+        yaml_file = tmp_path / "input.yaml"
+        yaml_file.write_text("sequences:\n  - protein:\n      id: A\n")
+        with pytest.raises(Exception, match="YAML input requires Boltz"):
+            discover_tool(yaml_file, device="gpu")
+
+    @patch("predict_structure.cli._is_tool_available", return_value=False)
+    def test_no_tools_available_raises(self, mock_avail, tmp_path):
+        import pytest
+        fasta = tmp_path / "test.fasta"
+        fasta.write_text(">seq\nACDE\n")
+        with pytest.raises(Exception, match="No prediction tool found"):
+            discover_tool(fasta, device="gpu")
+
+    @patch("predict_structure.cli._is_tool_available", side_effect=lambda t: t == "chai")
+    def test_falls_through_to_chai(self, mock_avail, tmp_path):
+        fasta = tmp_path / "test.fasta"
+        fasta.write_text(">seq\nACDE\n")
+        result = discover_tool(fasta, device="gpu")
+        assert result == "chai"
+
+    @patch("predict_structure.cli._is_tool_available", side_effect=lambda t: t == "esmfold")
+    def test_esmfold_as_last_resort_on_gpu(self, mock_avail, tmp_path):
+        fasta = tmp_path / "test.fasta"
+        fasta.write_text(">seq\nACDE\n")
+        result = discover_tool(fasta, device="gpu")
+        assert result == "esmfold"
+
+
+class TestMSAServerURL:
+    """Test --msa-server-url option on boltz and chai."""
+
+    def test_boltz_help_shows_msa_server_url(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["boltz", "--help"])
+        assert "--msa-server-url" in result.output
+
+    def test_chai_help_shows_msa_server_url(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["chai", "--help"])
+        assert "--msa-server-url" in result.output
+
+    def test_boltz_msa_server_url_in_debug(self, sample_fasta, tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "boltz", str(sample_fasta), "-o", str(tmp_path / "out"),
+            "--debug", "--msa-server-url", "https://my-server.com",
+        ])
+        assert result.exit_code == 0
+        assert "--use_msa_server" in result.output
+        assert "--msa_server_url" in result.output
+        assert "https://my-server.com" in result.output
+
+    def test_chai_msa_server_url_in_debug(self, sample_fasta, tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "chai", str(sample_fasta), "-o", str(tmp_path / "out"),
+            "--debug", "--msa-server-url", "https://my-server.com",
+        ])
+        assert result.exit_code == 0
+        assert "--use-msa-server" in result.output
+        assert "--msa-server-url" in result.output
+        assert "https://my-server.com" in result.output
+
+    def test_boltz_msa_server_url_implies_use_msa_server(self, sample_fasta, tmp_path):
+        """Passing --msa-server-url without --use-msa-server should still enable MSA server."""
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "boltz", str(sample_fasta), "-o", str(tmp_path / "out"),
+            "--debug", "--msa-server-url", "https://my-server.com",
+        ])
+        assert result.exit_code == 0
+        assert "--use_msa_server" in result.output
+
+    def test_esmfold_has_no_msa_server_url(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["esmfold", "--help"])
+        assert "--msa-server-url" not in result.output
+
+    def test_alphafold_has_no_msa_server_url(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["alphafold", "--help"])
+        assert "--msa-server-url" not in result.output
 
 
 class TestBackendRegistry:

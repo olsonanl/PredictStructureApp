@@ -1,12 +1,14 @@
+# CWL job: AlphaFold 2 multimer + full_dbs
 tool: alphafold
 input_file:
   class: File
-  path: ../../test_data/simple_protein.fasta
+  path: simple_protein.fasta
 output_dir: output
+num_recycles: 3
 device: gpu
 af2_data_dir:
   class: Directory
   path: /databases
-af2_model_preset: monomer
-af2_db_preset: reduced_dbs
+af2_model_preset: multimer
+af2_db_preset: full_dbs
 af2_max_template_date: "2022-01-01"

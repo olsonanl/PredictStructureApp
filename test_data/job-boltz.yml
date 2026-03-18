@@ -1,9 +1,11 @@
+# CWL job: Boltz-2 defaults (crambin)
 tool: boltz
 input_file:
   class: File
-  path: ../../test_data/simple_protein.fasta
+  path: simple_protein.fasta
 output_dir: output
 num_samples: 1
+num_recycles: 3
 sampling_steps: 200
 device: gpu
 use_msa_server: false

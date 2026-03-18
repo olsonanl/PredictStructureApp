@@ -18,9 +18,13 @@ from pathlib import Path
 import pytest
 import yaml
 
+# The unified CWL tool (used for predict-structure.cwl-level validation)
 CWL_TOOL = Path(__file__).resolve().parents[1] / "cwl" / "tools" / "predict-structure.cwl"
 JOBS_DIR = Path(__file__).resolve().parents[1] / "cwl" / "jobs"
 TEST_DATA = Path(__file__).resolve().parents[1] / "test_data"
+
+# Per-tool CWL definitions (from app repos)
+from predict_structure.config import get_tools, get_cwl_path, WORKSPACE_ROOT
 
 
 @pytest.mark.cwl
@@ -47,7 +51,7 @@ class TestAcceptanceTier1:
             assert "input_file" in doc, f"{job_file.name} missing 'input_file'"
 
     def test_backend_roundtrip(self):
-        """Build a job YAML from adapter command, verify it has expected keys."""
+        """Build a job YAML from adapter command, verify native CWL input names."""
         from predict_structure.backends.cwl import CWLBackend
 
         backend = CWLBackend()
@@ -58,8 +62,10 @@ class TestAcceptanceTier1:
         ]
         job = backend._build_job_yaml(command, tool_name="esmfold")
 
-        assert job["tool"] == "esmfold"
-        assert "input_file" in job
+        # No "tool" key — CWL definition IS the tool
+        assert "tool" not in job
+        assert job["sequences"]["class"] == "File"
+        assert job["sequences"]["path"] == "/data/crambin.fasta"
         assert job["num_recycles"] == 4
 
     def test_tool_covers_all_four_tools(self):
@@ -77,6 +83,25 @@ class TestAcceptanceTier1:
             tools_covered.add(doc["tool"])
         assert tools_covered == {"boltz", "chai", "alphafold", "esmfold"}
 
+    def test_per_tool_cwl_definitions_exist(self):
+        """Every tool has its own CWL definition in its app repo."""
+        for tool in get_tools():
+            cwl_path = get_cwl_path(tool)
+            assert cwl_path.exists(), f"CWL for '{tool}' not found at {cwl_path}"
+
+    def test_per_tool_cwl_validates(self):
+        """cwltool --validate succeeds for each per-tool CWL definition."""
+        for tool in get_tools():
+            cwl_path = get_cwl_path(tool)
+            result = subprocess.run(
+                ["cwltool", "--validate", str(cwl_path)],
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 0, (
+                f"Validation failed for {tool} ({cwl_path}):\n{result.stderr}"
+            )
+
 
 @pytest.mark.cwl
 @pytest.mark.docker
@@ -84,20 +109,20 @@ class TestAcceptanceTier2:
     """Tier 2: Dry-run with Docker (no GPU). Requires Docker daemon."""
 
     def test_esmfold_dry_run(self):
-        """cwltool --no-container runs predict-structure.cwl with ESMFold job.
+        """cwltool --no-container runs ESMFold CWL with a job file.
 
-        Uses --no-container because the predict-structure CLI may not be
-        installed in the Docker image yet. This validates the CWL wiring.
+        Uses --no-container because the tool may not be installed locally.
+        Validates that CWL wiring is correct.
         """
+        cwl_path = get_cwl_path("esmfold")
         job_file = JOBS_DIR / "crambin-esmfold.yml"
         result = subprocess.run(
-            ["cwltool", "--no-container", str(CWL_TOOL), str(job_file)],
+            ["cwltool", "--no-container", str(cwl_path), str(job_file)],
             capture_output=True,
             text=True,
             timeout=120,
         )
         # May fail due to missing tool, but should not fail on CWL parsing
-        # Check that CWL itself was parsed correctly
         assert "Workflow error" not in result.stderr or result.returncode != 0
 
 
@@ -115,9 +140,10 @@ class TestAcceptanceTier3:
 
     def test_esmfold_full_prediction(self, tmp_path):
         """Full CWL run with ESMFold on crambin — check output exists."""
+        cwl_path = get_cwl_path("esmfold")
         job_file = JOBS_DIR / "crambin-esmfold.yml"
         result = subprocess.run(
-            ["cwltool", "--outdir", str(tmp_path), str(CWL_TOOL), str(job_file)],
+            ["cwltool", "--outdir", str(tmp_path), str(cwl_path), str(job_file)],
             capture_output=True,
             text=True,
             timeout=600,

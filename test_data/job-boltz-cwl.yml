@@ -1,0 +1,10 @@
+input_file:
+  class: File
+  path: /tmp/ps-test/boltz-cwl/input.yaml
+output_dir: /tmp/ps-test/boltz-cwl/raw_output
+diffusion_samples: 1
+recycling_steps: 3
+sampling_steps: 200
+output_format: mmcif
+write_full_pae: true
+accelerator: gpu

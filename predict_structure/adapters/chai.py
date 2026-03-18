@@ -56,36 +56,57 @@ class ChaiAdapter(BaseAdapter):
         input_path: Path,
         output_dir: Path,
         *,
-        num_samples: int = 1,
+        num_samples: int = 5,
         num_recycles: int = 3,
         seed: int | None = None,
         device: str = "gpu",
         **kwargs: Any,
     ) -> list[str]:
         """Construct the ``chai-lab fold`` CLI command."""
+        from predict_structure.config import get_command
+        sampling_steps = kwargs.get("sampling_steps", 200)
+        num_trunk_samples = kwargs.get("num_trunk_samples", 1)
+        recycle_msa_subsample = kwargs.get("recycle_msa_subsample", 0)
+
         cmd = [
-            "chai-lab", "fold",
+            *get_command("chai"),
             str(input_path), str(output_dir),
             "--num-diffn-samples", str(num_samples),
             "--num-trunk-recycles", str(num_recycles),
+            "--num-diffn-timesteps", str(sampling_steps),
+            "--num-trunk-samples", str(num_trunk_samples),
+            "--recycle-msa-subsample", str(recycle_msa_subsample),
+            "--device", "cpu" if device == "cpu" else "cuda",
         ]
 
         if seed is not None:
             cmd.extend(["--seed", str(seed)])
         if self._msa_dir is not None:
             cmd.extend(["--msa-directory", str(self._msa_dir)])
+
+        # MSA server
         if kwargs.get("use_msa_server"):
             cmd.append("--use-msa-server")
+        if kwargs.get("msa_server_url"):
+            cmd.extend(["--msa-server-url", kwargs["msa_server_url"]])
 
-        # Pass-through chai-specific flags (underscore → hyphen)
-        for key, val in kwargs.items():
-            if key.startswith("chai_"):
-                flag = "--" + key[5:].replace("_", "-")
-                if isinstance(val, bool):
-                    if val:
-                        cmd.append(flag)
-                else:
-                    cmd.extend([flag, str(val)])
+        # ESM embeddings (on by default; only emit flag when disabled)
+        if kwargs.get("use_esm_embeddings") is False:
+            cmd.append("--no-use-esm-embeddings")
+
+        # Templates
+        if kwargs.get("use_templates_server"):
+            cmd.append("--use-templates-server")
+        if kwargs.get("template_hits_path"):
+            cmd.extend(["--template-hits-path", str(kwargs["template_hits_path"])])
+
+        # Constraints
+        if kwargs.get("constraint_path"):
+            cmd.extend(["--constraint-path", str(kwargs["constraint_path"])])
+
+        # Low memory (on by default; only emit flag when disabled)
+        if kwargs.get("low_memory") is False:
+            cmd.append("--no-low-memory")
 
         return cmd
 

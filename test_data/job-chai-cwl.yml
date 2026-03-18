@@ -1,0 +1,5 @@
+input_fasta:
+  class: File
+  path: test_data/simple_protein.fasta
+output_directory: /tmp/ps-test/chai-cwl/raw_output
+num_samples: 1

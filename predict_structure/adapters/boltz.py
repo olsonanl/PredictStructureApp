@@ -71,8 +71,8 @@ class BoltzAdapter(BaseAdapter):
         **kwargs: Any,
     ) -> list[str]:
         """Construct the ``boltz predict`` CLI command."""
-        cmd = [
-            "boltz", "predict", str(input_path),
+        from predict_structure.config import get_command
+        cmd = [*get_command("boltz"), str(input_path),
             "--out_dir", str(output_dir),
             "--diffusion_samples", str(num_samples),
             "--recycling_steps", str(num_recycles),
@@ -84,6 +84,8 @@ class BoltzAdapter(BaseAdapter):
 
         if kwargs.get("use_msa_server"):
             cmd.append("--use_msa_server")
+        if kwargs.get("msa_server_url"):
+            cmd.extend(["--msa_server_url", kwargs["msa_server_url"]])
         if kwargs.get("boltz_use_potentials"):
             cmd.append("--use_potentials")
 

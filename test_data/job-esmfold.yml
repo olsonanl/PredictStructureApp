@@ -1,0 +1,9 @@
+# CWL job: ESMFold defaults (crambin)
+tool: esmfold
+input_file:
+  class: File
+  path: simple_protein.fasta
+output_dir: output
+num_recycles: 3
+device: gpu
+fp16: false

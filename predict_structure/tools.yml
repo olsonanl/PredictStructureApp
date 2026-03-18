@@ -1,0 +1,66 @@
+# Tool configuration for PredictStructure.
+#
+# Each tool entry provides:
+#
+#   image      — Container image URI.
+#                docker://  → Docker Hub or registry image
+#                file://    → Local Apptainer/Singularity .sif file
+#
+#   cwl        — Path to the tool's CWL definition (relative to workspace root).
+#
+#   conda_env  — Conda environment name for local/container execution.
+#
+#   command    — Base command (executable + subcommand) as a list.
+#                The adapter appends input, output, and flags after this.
+#                For tools inside a conda env, use the full path to the
+#                executable so the correct environment is used without
+#                needing `conda run`.
+#
+# ─── Shared container (optional) ──────────────────────────────────────
+#
+# When all tools live in a single Apptainer image with per-tool conda
+# environments, set a top-level container.sif:
+#
+#   container:
+#     sif: file:///hpc/images/predict-structure-all.sif
+#
+# The backends use this as follows:
+#   - subprocess:  <command> [args...]
+#   - singularity: singularity exec <sif> <command> [args...]
+#   - docker:      docker run <image> <command> [args...]
+#   - cwl:         cwltool <cwl> job.yml  (image baked into the CWL definition)
+
+# container:
+#   sif: file:///hpc/images/predict-structure-all.sif
+
+tools:
+  boltz:
+    image: docker://dxkb/boltz-bvbrc:latest-gpu
+    cwl: boltzApp/cwl/boltz.cwl
+    conda_env: boltz
+    command:
+      - /opt/conda-boltz/bin/boltz
+      - predict
+
+  chai:
+    image: docker://dxkb/chai-bvbrc:latest-gpu
+    cwl: ChaiApp/cwl/chailab.cwl
+    conda_env: chai
+    command:
+      - /opt/conda-chai/bin/chai-lab
+      - fold
+
+  alphafold:
+    image: docker://wilke/alphafold
+    cwl: AlphaFoldApp/alphafold.cwl
+    conda_env: alphafold
+    command:
+      - /opt/conda-alphafold/bin/python
+      - /app/alphafold/run_alphafold.py
+
+  esmfold:
+    image: docker://dxkb/esmfold-bvbrc:latest-gpu
+    cwl: ESMFoldApp/cwl/esmfold.cwl
+    conda_env: esmfold
+    command:
+      - /opt/conda-esmfold/bin/esm-fold-hf

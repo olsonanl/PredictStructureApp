@@ -1,8 +1,10 @@
+# CWL job: AlphaFold 2 monomer + reduced_dbs (crambin)
 tool: alphafold
 input_file:
   class: File
-  path: ../../test_data/simple_protein.fasta
+  path: simple_protein.fasta
 output_dir: output
+num_recycles: 3
 device: gpu
 af2_data_dir:
   class: Directory

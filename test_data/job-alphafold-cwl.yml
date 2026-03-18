@@ -1,0 +1,9 @@
+fasta_paths:
+  class: File
+  path: test_data/simple_protein.fasta
+output_dir: /tmp/ps-test/af2-cwl/raw_output
+data_dir: /databases
+model_preset: monomer
+db_preset: reduced_dbs
+max_template_date: '2022-01-01'
+use_gpu_relax: true

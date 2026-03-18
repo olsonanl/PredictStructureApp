@@ -66,8 +66,9 @@ class AlphaFoldAdapter(BaseAdapter):
         model_preset = kwargs.get("af2_model_preset", "monomer")
         db_preset = kwargs.get("af2_db_preset", "reduced_dbs")
 
+        from predict_structure.config import get_command
         cmd = [
-            "python", "/app/alphafold/run_alphafold.py",
+            *get_command("alphafold"),
             "--fasta_paths", str(input_path),
             "--output_dir", str(output_dir),
             "--data_dir", str(data_dir),

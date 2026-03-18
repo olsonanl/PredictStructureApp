@@ -5,3 +5,4 @@ input_file:
 output_dir: output
 num_recycles: 4
 device: cpu
+fp16: false

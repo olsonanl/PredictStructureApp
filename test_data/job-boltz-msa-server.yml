@@ -1,0 +1,14 @@
+# CWL job: Boltz-2 with MSA server, potentials, 5 samples
+tool: boltz
+input_file:
+  class: File
+  path: simple_protein.fasta
+output_dir: output
+num_samples: 5
+num_recycles: 3
+sampling_steps: 200
+seed: 123
+device: gpu
+use_msa_server: true
+msa_server_url: "https://mmseqs.example.com"
+use_potentials: true

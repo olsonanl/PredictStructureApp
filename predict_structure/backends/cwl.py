@@ -1,4 +1,4 @@
-"""CWL execution backend for workflow-based tool invocation."""
+"""CWL execution backend — dispatches to per-tool CWL definitions."""
 
 from __future__ import annotations
 
@@ -9,51 +9,136 @@ from pathlib import Path
 
 import yaml
 
+from predict_structure.config import get_cwl_path, WORKSPACE_ROOT
+
 logger = logging.getLogger(__name__)
 
-# Mapping from CLI flags to CWL job input names.
-# Flags not in this map are passed through with the flag name (minus --)
-# converted to underscore.
-_FLAG_TO_CWL: dict[str, str] = {
-    "--output-dir": "output_dir",
-    "--num-samples": "num_samples",
-    "--num-recycles": "num_recycles",
-    "--seed": "seed",
-    "--device": "device",
-    "--msa": "msa",
-    "--output-format": "output_format",
-    "--sampling-steps": "sampling_steps",
-    "--use-msa-server": "use_msa_server",
-    "--af2-data-dir": "af2_data_dir",
-    "--af2-model-preset": "af2_model_preset",
-    "--af2-db-preset": "af2_db_preset",
-    "--image": None,       # consumed by docker backend, skip
-    "--backend": None,     # meta-flag, skip
+# ---------------------------------------------------------------------------
+# Native CWL input-name mapping per tool
+#
+# Each entry maps a native CLI flag (as produced by the adapter's
+# build_command) to the CWL input name in the per-tool .cwl definition.
+# Flags not listed are passed through with underscored names.
+# A value of None means "skip this flag".
+# ---------------------------------------------------------------------------
+
+_BOLTZ_MAP: dict[str, str | None] = {
+    "--out_dir": "output_dir",
+    "--diffusion_samples": "diffusion_samples",
+    "--recycling_steps": "recycling_steps",
+    "--sampling_steps": "sampling_steps",
+    "--output_format": "output_format",
+    "--write_full_pae": "write_full_pae",
+    "--accelerator": "accelerator",
+    "--use_msa_server": "use_msa_server",
+    "--msa_server_url": "msa_server_url",
+    "--use_potentials": "use_potentials",
 }
 
-# Flags that are boolean (presence = true)
-_BOOLEAN_FLAGS = {"--use-msa-server"}
+_CHAI_MAP: dict[str, str | None] = {
+    "--num-diffn-samples": "num_diffn_samples",
+    "--num-trunk-recycles": "num_trunk_recycles",
+    "--num-diffn-timesteps": "num_diffn_timesteps",
+    "--num-trunk-samples": "num_trunk_samples",
+    "--seed": "seed",
+    "--device": "device",
+    "--msa-directory": "msa_directory",
+    "--use-msa-server": "use_msa_server",
+    "--msa-server-url": "msa_server_url",
+    "--no-use-esm-embeddings": None,  # boolean negation handled separately
+    "--use-templates-server": "use_templates_server",
+    "--constraint-path": "constraint_path",
+    "--template-hits-path": "template_hits_path",
+    "--recycle-msa-subsample": "recycle_msa_subsample",
+    "--no-low-memory": None,  # boolean negation
+}
 
-# Flags whose CWL type is File (need class: File wrapper)
-_FILE_FLAGS = {"--msa"}
+_ALPHAFOLD_MAP: dict[str, str | None] = {
+    "--fasta_paths": None,  # handled as input_file
+    "--output_dir": "output_dir",
+    "--data_dir": "data_dir",
+    "--model_preset": "model_preset",
+    "--db_preset": "db_preset",
+    "--max_template_date": "max_template_date",
+    "--random_seed": "random_seed",
+    "--use_gpu_relax": "use_gpu_relax",
+    "--use_precomputed_msas": "use_precomputed_msas",
+    # Database sub-paths are derived from data_dir inside the container,
+    # so we skip them in the job YAML.
+    "--uniref90_database_path": None,
+    "--mgnify_database_path": None,
+    "--template_mmcif_dir": None,
+    "--obsolete_pdbs_path": None,
+    "--small_bfd_database_path": None,
+    "--bfd_database_path": None,
+    "--uniref30_database_path": None,
+    "--pdb70_database_path": None,
+    "--pdb_seqres_database_path": None,
+    "--uniprot_database_path": None,
+}
 
-# Flags whose CWL type is Directory (need class: Directory wrapper)
-_DIRECTORY_FLAGS = {"--af2-data-dir"}
+_ESMFOLD_MAP: dict[str, str | None] = {
+    "-i": None,  # handled as input_file
+    "-o": "output_dir",
+    "--num-recycles": "num_recycles",
+    "--chunk-size": "chunk_size",
+    "--max-tokens-per-batch": "max_tokens_per_batch",
+    "--cpu-only": "cpu_only",
+    "--fp16": None,  # no CWL input; fold into cpu_only logic
+}
 
-# Integer-valued CWL inputs
-_INT_FLAGS = {"--num-samples", "--num-recycles", "--seed", "--sampling-steps"}
+_TOOL_MAPS: dict[str, dict[str, str | None]] = {
+    "boltz": _BOLTZ_MAP,
+    "chai": _CHAI_MAP,
+    "alphafold": _ALPHAFOLD_MAP,
+    "esmfold": _ESMFOLD_MAP,
+}
+
+# CWL input name for the input file per tool
+_INPUT_FILE_KEY: dict[str, str] = {
+    "boltz": "input_file",
+    "chai": "input_fasta",
+    "alphafold": "fasta_paths",
+    "esmfold": "sequences",
+}
+
+# CWL input name for the output directory per tool
+_OUTPUT_DIR_KEY: dict[str, str] = {
+    "boltz": "output_dir",
+    "chai": "output_directory",
+    "alphafold": "output_dir",
+    "esmfold": "output_dir",
+}
+
+# Boolean flags per tool (presence = true)
+_BOOLEAN_FLAGS_PER_TOOL: dict[str, set[str]] = {
+    "boltz": {"--use_msa_server", "--use_potentials", "--write_full_pae"},
+    "chai": {"--use-msa-server", "--use-templates-server", "--no-use-esm-embeddings", "--no-low-memory"},
+    "alphafold": set(),
+    "esmfold": {"--cpu-only", "--fp16"},
+}
+
+# Integer-valued flags per tool
+_INT_FLAGS_PER_TOOL: dict[str, set[str]] = {
+    "boltz": {"--diffusion_samples", "--recycling_steps", "--sampling_steps"},
+    "chai": {"--num-diffn-samples", "--num-trunk-recycles", "--num-diffn-timesteps", "--num-trunk-samples", "--seed", "--recycle-msa-subsample"},
+    "alphafold": {"--random_seed"},
+    "esmfold": {"--num-recycles", "--chunk-size", "--max-tokens-per-batch"},
+}
+
+# Flags whose value is = appended (e.g. --use_gpu_relax=true)
+_EQUALS_FLAGS = {"--use_gpu_relax", "--use_precomputed_msas"}
 
 
 class CWLBackend:
-    """Run predictions via CWL (cwltool, toil-cwl-runner, or GoWe).
+    """Run predictions via per-tool CWL definitions.
 
-    The backend takes the command list produced by an adapter's
-    ``build_command()`` method, reverse-maps it into a CWL job YAML,
-    and invokes the CWL runner with the unified predict-structure.cwl
-    tool definition.
+    The backend takes the native tool command produced by an adapter's
+    ``build_command()``, maps it to a CWL job YAML using the per-tool
+    CWL input names, and invokes the CWL runner (cwltool, toil, GoWe)
+    with the tool-specific ``.cwl`` definition.
     """
 
-    DEFAULT_CWL_TOOL = Path(__file__).resolve().parents[2] / "cwl" / "tools" / "predict-structure.cwl"
     DEFAULT_RUNNER = "cwltool"
 
     def __init__(
@@ -61,8 +146,53 @@ class CWLBackend:
         cwl_tool: str | Path | None = None,
         runner: str | None = None,
     ):
-        self._cwl_tool = str(cwl_tool or self.DEFAULT_CWL_TOOL)
+        self._cwl_tool_override = str(cwl_tool) if cwl_tool else None
         self._runner = runner or self.DEFAULT_RUNNER
+
+    def _resolve_cwl_tool(self, tool_name: str | None) -> str:
+        """Resolve the CWL tool definition path for a given tool."""
+        if self._cwl_tool_override:
+            return self._cwl_tool_override
+        if tool_name:
+            path = get_cwl_path(tool_name)
+            if path.exists():
+                return str(path)
+            logger.warning("CWL tool not found at %s", path)
+            return str(path)
+        raise ValueError("No tool_name provided to resolve CWL tool definition.")
+
+    def format_command(
+        self,
+        command: list[str],
+        **kwargs,
+    ) -> list[str]:
+        """Write a CWL job YAML and return the cwltool command line.
+
+        When *output_dir* is provided, the job file is written to
+        ``<output_dir>/job.yml`` for independent re-use.
+        """
+        tool_name = kwargs.get("tool_name")
+        output_dir = kwargs.get("output_dir")
+        cwl_tool = self._resolve_cwl_tool(tool_name)
+
+        job = self._build_job_yaml(command, tool_name)
+        job_yaml = yaml.dump(job, default_flow_style=False, sort_keys=False).rstrip()
+
+        # Write job file to output directory
+        if output_dir is not None:
+            job_path = Path(output_dir) / "job.yml"
+            job_path.parent.mkdir(parents=True, exist_ok=True)
+            job_path.write_text(job_yaml + "\n")
+            cwl_cmd_str = f"{self._runner} {cwl_tool} {job_path}"
+        else:
+            cwl_cmd_str = f"{self._runner} {cwl_tool} job.yml"
+
+        lines = [cwl_cmd_str]
+        lines.append("# --- job.yml ---")
+        for line in job_yaml.splitlines():
+            lines.append(f"# {line}")
+
+        return lines
 
     def run(
         self,
@@ -73,24 +203,25 @@ class CWLBackend:
         timeout: int | None = None,
         **kwargs,
     ) -> int:
-        """Build a CWL job YAML from command args and invoke the runner.
+        """Build a CWL job YAML and invoke the runner.
 
         Args:
-            command: The tool command as a list of strings (from adapter.build_command).
+            command: Native tool command list from adapter.build_command().
             tool_name: Tool name (boltz, chai, alphafold, esmfold).
-            gpu: Whether GPU is requested (encoded in CWL hints, not job YAML).
+            gpu: Whether GPU is requested (encoded in CWL hints).
             timeout: Max seconds for the CWL runner.
 
         Returns:
             Exit code from the CWL runner.
         """
+        cwl_tool = self._resolve_cwl_tool(tool_name)
         job = self._build_job_yaml(command, tool_name)
 
         job_dir = Path(tempfile.mkdtemp(prefix="cwl-job-"))
         job_path = job_dir / "job.yml"
         job_path.write_text(yaml.dump(job, default_flow_style=False))
 
-        cwl_cmd = [self._runner, str(self._cwl_tool), str(job_path)]
+        cwl_cmd = [self._runner, cwl_tool, str(job_path)]
         logger.info("Running: %s", " ".join(cwl_cmd))
 
         result = subprocess.run(cwl_cmd, timeout=timeout)
@@ -101,59 +232,77 @@ class CWLBackend:
         command: list[str],
         tool_name: str | None,
     ) -> dict:
-        """Parse a predict-structure CLI command into CWL job inputs.
+        """Parse a native tool command into a CWL job dict.
 
-        The adapter produces something like:
-            ["boltz", "predict", "/path/input.yaml", "--out_dir", "/path/out", ...]
-
-        But the CWL tool wraps ``predict-structure <tool> <input> [OPTIONS]``,
-        so we need to extract the tool name and input file from the native
-        command and map the options to CWL input names.
-
-        Args:
-            command: Native tool command list from adapter.build_command().
-            tool_name: Tool identifier from the adapter.
-
-        Returns:
-            Dict suitable for yaml.dump as a CWL job file.
+        Uses per-tool flag maps to translate native CLI flags into the
+        CWL input names defined in each tool's ``.cwl`` definition.
         """
+        flag_map = _TOOL_MAPS.get(tool_name or "", {})
+        bool_flags = _BOOLEAN_FLAGS_PER_TOOL.get(tool_name or "", set())
+        int_flags = _INT_FLAGS_PER_TOOL.get(tool_name or "", set())
+        input_key = _INPUT_FILE_KEY.get(tool_name or "", "input_file")
+        output_key = _OUTPUT_DIR_KEY.get(tool_name or "", "output_dir")
+
         job: dict = {}
 
-        if tool_name:
-            job["tool"] = tool_name
-
-        # Find the input file — first positional arg that looks like a file path
-        input_file = self._find_input_file(command)
+        # Find input file and output dir from positional/flag args
+        input_file, output_dir = self._find_io_paths(command, tool_name)
         if input_file:
-            job["input_file"] = {"class": "File", "path": str(input_file)}
+            job[input_key] = {"class": "File", "path": str(input_file)}
+        if output_dir:
+            job[output_key] = str(output_dir)
 
-        # Parse flags from the command
+        # Parse flags
         i = 0
         while i < len(command):
             arg = command[i]
-            if arg.startswith("--"):
-                cwl_name = _FLAG_TO_CWL.get(arg)
-                if cwl_name is None and arg in _FLAG_TO_CWL:
-                    # Explicitly skipped flag
-                    i += 2 if (i + 1 < len(command) and not command[i + 1].startswith("--")) else 1
-                    continue
-                if cwl_name is None:
-                    # Unknown flag — convert to underscore name
-                    cwl_name = arg.lstrip("-").replace("-", "_")
 
-                if arg in _BOOLEAN_FLAGS:
+            # Handle --flag=value syntax (e.g. --use_gpu_relax=true)
+            if "=" in arg and arg.startswith("--"):
+                flag, val = arg.split("=", 1)
+                cwl_name = flag_map.get(flag)
+                if cwl_name is None:
+                    i += 1
+                    continue
+                if val.lower() in ("true", "false"):
+                    job[cwl_name] = val.lower() == "true"
+                else:
+                    job[cwl_name] = val
+                i += 1
+                continue
+
+            if arg.startswith("-"):
+                cwl_name = flag_map.get(arg)
+
+                # Explicitly skipped
+                if cwl_name is None and arg in flag_map:
+                    # Skip flag + its value if it has one
+                    if arg not in bool_flags and i + 1 < len(command) and not command[i + 1].startswith("-"):
+                        i += 2
+                    else:
+                        i += 1
+                    continue
+
+                # Unknown flag — skip
+                if cwl_name is None:
+                    if arg in bool_flags:
+                        i += 1
+                    elif i + 1 < len(command) and not command[i + 1].startswith("-"):
+                        i += 2
+                    else:
+                        i += 1
+                    continue
+
+                # Boolean flag
+                if arg in bool_flags:
                     job[cwl_name] = True
                     i += 1
                     continue
 
-                # Consume next token as value
+                # Flag with value
                 if i + 1 < len(command):
                     val = command[i + 1]
-                    if arg in _FILE_FLAGS:
-                        job[cwl_name] = {"class": "File", "path": val}
-                    elif arg in _DIRECTORY_FLAGS:
-                        job[cwl_name] = {"class": "Directory", "path": val}
-                    elif arg in _INT_FLAGS:
+                    if arg in int_flags:
                         job[cwl_name] = int(val)
                     else:
                         job[cwl_name] = val
@@ -166,20 +315,56 @@ class CWLBackend:
         return job
 
     @staticmethod
-    def _find_input_file(command: list[str]) -> Path | None:
-        """Extract the input file path from a native tool command.
+    def _find_io_paths(
+        command: list[str],
+        tool_name: str | None,
+    ) -> tuple[Path | None, Path | None]:
+        """Extract input file and output directory from a native command."""
+        input_file: Path | None = None
+        output_dir: Path | None = None
 
-        Heuristic: find the first argument that looks like a file path
-        (contains a dot or slash) and is not a flag value.
-        """
-        for i, arg in enumerate(command):
-            if arg.startswith("-"):
-                continue
-            # Skip the tool subcommand (e.g., "predict", "fold")
-            if arg in ("predict", "fold", "run_alphafold.py"):
-                continue
-            # Check if this looks like a file path
-            p = Path(arg)
-            if p.suffix or "/" in arg:
-                return p
-        return None
+        if tool_name == "boltz":
+            # boltz predict <input> --out_dir <output>
+            for i, arg in enumerate(command):
+                if arg == "--out_dir" and i + 1 < len(command):
+                    output_dir = Path(command[i + 1])
+            # Input is first positional after "predict"
+            for i, arg in enumerate(command):
+                if arg == "predict" and i + 1 < len(command):
+                    input_file = Path(command[i + 1])
+                    break
+
+        elif tool_name == "chai":
+            # chai-lab fold <input> <output>
+            positionals = []
+            i = 0
+            while i < len(command):
+                if command[i].startswith("-"):
+                    # Skip flag + value
+                    i += 2 if (i + 1 < len(command) and not command[i + 1].startswith("-")) else 1
+                    continue
+                if command[i] not in ("chai-lab", "fold"):
+                    positionals.append(command[i])
+                i += 1
+            if len(positionals) >= 1:
+                input_file = Path(positionals[0])
+            if len(positionals) >= 2:
+                output_dir = Path(positionals[1])
+
+        elif tool_name == "alphafold":
+            # python /app/alphafold/run_alphafold.py --fasta_paths <input> --output_dir <output>
+            for i, arg in enumerate(command):
+                if arg == "--fasta_paths" and i + 1 < len(command):
+                    input_file = Path(command[i + 1])
+                elif arg == "--output_dir" and i + 1 < len(command):
+                    output_dir = Path(command[i + 1])
+
+        elif tool_name == "esmfold":
+            # esm-fold-hf -i <input> -o <output>
+            for i, arg in enumerate(command):
+                if arg == "-i" and i + 1 < len(command):
+                    input_file = Path(command[i + 1])
+                elif arg == "-o" and i + 1 < len(command):
+                    output_dir = Path(command[i + 1])
+
+        return input_file, output_dir

@@ -1,0 +1,5 @@
+sequences:
+  class: File
+  path: test_data/simple_protein.fasta
+output_dir: /tmp/ps-test/esm-cwl/raw_output
+num_recycles: 3

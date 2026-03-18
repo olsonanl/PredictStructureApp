@@ -12,7 +12,8 @@ class TestBoltzAdapter:
         prepared = adapter.prepare_input(sample_fasta, tmp_output)
         cmd = adapter.build_command(prepared, tmp_output / "raw")
 
-        assert cmd[0:2] == ["boltz", "predict"]
+        assert cmd[0].endswith("boltz")
+        assert cmd[1] == "predict"
         assert "--diffusion_samples" in cmd
         assert cmd[cmd.index("--diffusion_samples") + 1] == "1"
         assert "--recycling_steps" in cmd
@@ -77,7 +78,8 @@ class TestChaiAdapter:
             num_samples=3, num_recycles=5, seed=42,
         )
 
-        assert cmd[0:2] == ["chai-lab", "fold"]
+        assert cmd[0].endswith("chai-lab")
+        assert cmd[1] == "fold"
         assert "--num-diffn-samples" in cmd
         assert cmd[cmd.index("--num-diffn-samples") + 1] == "3"
         assert "--num-trunk-recycles" in cmd
@@ -145,7 +147,7 @@ class TestESMFoldAdapter:
             num_recycles=8, device="cpu",
         )
 
-        assert cmd[0] == "esm-fold-hf"
+        assert cmd[0].endswith("esm-fold-hf")
         assert "-i" in cmd
         assert "-o" in cmd
         assert "--num-recycles" in cmd

@@ -4,4 +4,6 @@ input_file:
   path: ../../test_data/simple_protein.fasta
 output_dir: output
 num_samples: 1
+sampling_steps: 200
 device: gpu
+use_msa_server: false

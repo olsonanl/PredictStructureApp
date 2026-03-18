@@ -49,11 +49,12 @@ class ESMFoldAdapter(BaseAdapter):
         **kwargs: Any,
     ) -> list[str]:
         """Construct the ``esm-fold-hf`` CLI command."""
+        from predict_structure.config import get_command
         if num_samples > 1:
             logger.info("ESMFold is deterministic; ignoring --num-samples %d", num_samples)
 
         cmd = [
-            "esm-fold-hf",
+            *get_command("esmfold"),
             "-i", str(input_path),
             "-o", str(output_dir),
             "--num-recycles", str(num_recycles),

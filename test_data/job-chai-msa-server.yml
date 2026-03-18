@@ -1,0 +1,12 @@
+# CWL job: Chai-1 with custom MSA server
+tool: chai
+input_file:
+  class: File
+  path: simple_protein.fasta
+output_dir: output
+num_samples: 1
+num_recycles: 3
+sampling_steps: 100
+device: gpu
+use_msa_server: true
+msa_server_url: "https://mmseqs.example.com"

@@ -17,6 +17,14 @@ class SubprocessBackend:
     conda env, or system-wide). Streams stdout/stderr to the terminal.
     """
 
+    def format_command(
+        self,
+        command: list[str],
+        **kwargs,
+    ) -> list[str]:
+        """Return the command as a single shell-ready string."""
+        return [" ".join(str(c) for c in command)]
+
     def run(
         self,
         command: list[str],

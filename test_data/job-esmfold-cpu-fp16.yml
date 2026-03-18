@@ -1,0 +1,11 @@
+# CWL job: ESMFold CPU + FP16 + chunking
+tool: esmfold
+input_file:
+  class: File
+  path: simple_protein.fasta
+output_dir: output
+num_recycles: 3
+device: cpu
+fp16: true
+chunk_size: 64
+max_tokens_per_batch: 1024
