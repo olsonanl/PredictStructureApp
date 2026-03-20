@@ -3,13 +3,15 @@
 import pytest
 from pathlib import Path
 
+from predict_structure.entities import EntityList, EntityType
+
 
 class TestBoltzAdapter:
-    def test_build_command_defaults(self, sample_fasta, tmp_output):
+    def test_build_command_defaults(self, protein_entity_list, tmp_output):
         from predict_structure.adapters.boltz import BoltzAdapter
 
         adapter = BoltzAdapter()
-        prepared = adapter.prepare_input(sample_fasta, tmp_output)
+        prepared = adapter.prepare_input(protein_entity_list, tmp_output)
         cmd = adapter.build_command(prepared, tmp_output / "raw")
 
         assert cmd[0].endswith("boltz")
@@ -22,11 +24,11 @@ class TestBoltzAdapter:
         assert "--accelerator" in cmd
         assert cmd[cmd.index("--accelerator") + 1] == "gpu"
 
-    def test_build_command_custom(self, sample_fasta, tmp_output):
+    def test_build_command_custom(self, protein_entity_list, tmp_output):
         from predict_structure.adapters.boltz import BoltzAdapter
 
         adapter = BoltzAdapter()
-        prepared = adapter.prepare_input(sample_fasta, tmp_output)
+        prepared = adapter.prepare_input(protein_entity_list, tmp_output)
         cmd = adapter.build_command(
             prepared, tmp_output / "raw",
             num_samples=5, num_recycles=10, device="cpu",
@@ -39,11 +41,11 @@ class TestBoltzAdapter:
         assert "--use_msa_server" in cmd
         assert "--use_potentials" in cmd
 
-    def test_prepare_input_fasta_to_yaml(self, sample_fasta, tmp_output):
+    def test_prepare_input_creates_yaml(self, protein_entity_list, tmp_output):
         from predict_structure.adapters.boltz import BoltzAdapter
 
         adapter = BoltzAdapter()
-        result = adapter.prepare_input(sample_fasta, tmp_output)
+        result = adapter.prepare_input(protein_entity_list, tmp_output)
         assert result.suffix == ".yaml"
         assert result.exists()
 
@@ -54,9 +56,40 @@ class TestBoltzAdapter:
         yaml_file = tmp_path / "input.yaml"
         yaml_file.write_text(yaml.dump({"version": 1, "sequences": []}))
 
+        el = EntityList()
+        el.add(EntityType.PROTEIN, str(yaml_file), name="yaml_input")
+
         adapter = BoltzAdapter()
-        result = adapter.prepare_input(yaml_file, tmp_output)
+        result = adapter.prepare_input(el, tmp_output)
         assert result == yaml_file
+
+    def test_prepare_input_multi_entity(self, multi_entity_list, tmp_output):
+        from predict_structure.adapters.boltz import BoltzAdapter
+        import yaml
+
+        adapter = BoltzAdapter()
+        result = adapter.prepare_input(multi_entity_list, tmp_output)
+        assert result.suffix == ".yaml"
+
+        data = yaml.safe_load(result.read_text())
+        assert len(data["sequences"]) == 2
+        assert "protein" in data["sequences"][0]
+        assert "ligand" in data["sequences"][1]
+
+    def test_supported_entities(self):
+        from predict_structure.adapters.boltz import BoltzAdapter
+
+        adapter = BoltzAdapter()
+        assert EntityType.PROTEIN in adapter.supported_entities
+        assert EntityType.DNA in adapter.supported_entities
+        assert EntityType.LIGAND in adapter.supported_entities
+        assert EntityType.GLYCAN not in adapter.supported_entities
+
+    def test_validate_entities_ok(self, multi_entity_list):
+        from predict_structure.adapters.boltz import BoltzAdapter
+
+        adapter = BoltzAdapter()
+        adapter.validate_entities(multi_entity_list)  # should not raise
 
     def test_preflight(self):
         from predict_structure.adapters.boltz import BoltzAdapter
@@ -68,13 +101,13 @@ class TestBoltzAdapter:
 
 
 class TestChaiAdapter:
-    def test_build_command(self, sample_fasta, tmp_output):
+    def test_build_command(self, protein_entity_list, tmp_output):
         from predict_structure.adapters.chai import ChaiAdapter
 
         adapter = ChaiAdapter()
-        adapter.prepare_input(sample_fasta, tmp_output)
+        prepared = adapter.prepare_input(protein_entity_list, tmp_output)
         cmd = adapter.build_command(
-            sample_fasta, tmp_output / "raw",
+            prepared, tmp_output / "raw",
             num_samples=3, num_recycles=5, seed=42,
         )
 
@@ -87,31 +120,60 @@ class TestChaiAdapter:
         assert "--seed" in cmd
         assert cmd[cmd.index("--seed") + 1] == "42"
 
-    def test_msa_conversion(self, sample_fasta, sample_a3m, tmp_output):
+    def test_prepare_creates_typed_fasta(self, protein_entity_list, tmp_output):
         from predict_structure.adapters.chai import ChaiAdapter
 
         adapter = ChaiAdapter()
-        adapter.prepare_input(sample_fasta, tmp_output, msa_path=sample_a3m)
+        prepared = adapter.prepare_input(protein_entity_list, tmp_output)
+        content = prepared.read_text()
+        assert ">protein|name=A" in content
+
+    def test_msa_conversion(self, protein_entity_list, sample_a3m, tmp_output):
+        from predict_structure.adapters.chai import ChaiAdapter
+
+        adapter = ChaiAdapter()
+        adapter.prepare_input(protein_entity_list, tmp_output, msa_path=sample_a3m)
         assert adapter._msa_dir is not None
 
-        cmd = adapter.build_command(sample_fasta, tmp_output / "raw")
+        prepared = tmp_output / "input.fasta"
+        cmd = adapter.build_command(prepared, tmp_output / "raw")
         assert "--msa-directory" in cmd
+
+    def test_supported_entities(self):
+        from predict_structure.adapters.chai import ChaiAdapter
+
+        adapter = ChaiAdapter()
+        assert EntityType.PROTEIN in adapter.supported_entities
+        assert EntityType.DNA in adapter.supported_entities
+        assert EntityType.LIGAND in adapter.supported_entities
+        assert EntityType.SMILES not in adapter.supported_entities
+
+    def test_validate_rejects_smiles(self):
+        from predict_structure.adapters.chai import ChaiAdapter
+
+        el = EntityList()
+        el.add(EntityType.SMILES, "CCO")
+        adapter = ChaiAdapter()
+        with pytest.raises(ValueError, match="does not support"):
+            adapter.validate_entities(el)
 
 
 class TestAlphaFoldAdapter:
-    def test_build_command_requires_data_dir(self, sample_fasta, tmp_output):
+    def test_build_command_requires_data_dir(self, protein_entity_list, tmp_output):
         from predict_structure.adapters.alphafold import AlphaFoldAdapter
 
         adapter = AlphaFoldAdapter()
+        prepared = adapter.prepare_input(protein_entity_list, tmp_output)
         with pytest.raises(ValueError, match="af2-data-dir"):
-            adapter.build_command(sample_fasta, tmp_output / "raw")
+            adapter.build_command(prepared, tmp_output / "raw")
 
-    def test_build_command_with_data_dir(self, sample_fasta, tmp_output, tmp_path):
+    def test_build_command_with_data_dir(self, protein_entity_list, tmp_output, tmp_path):
         from predict_structure.adapters.alphafold import AlphaFoldAdapter
 
         adapter = AlphaFoldAdapter()
+        prepared = adapter.prepare_input(protein_entity_list, tmp_output)
         cmd = adapter.build_command(
-            sample_fasta, tmp_output / "raw",
+            prepared, tmp_output / "raw",
             af2_data_dir=str(tmp_path / "databases"),
             seed=123,
         )
@@ -123,12 +185,13 @@ class TestAlphaFoldAdapter:
         assert "--random_seed" in cmd
         assert cmd[cmd.index("--random_seed") + 1] == "123"
 
-    def test_build_command_multimer(self, sample_fasta, tmp_output, tmp_path):
+    def test_build_command_multimer(self, protein_entity_list, tmp_output, tmp_path):
         from predict_structure.adapters.alphafold import AlphaFoldAdapter
 
         adapter = AlphaFoldAdapter()
+        prepared = adapter.prepare_input(protein_entity_list, tmp_output)
         cmd = adapter.build_command(
-            sample_fasta, tmp_output / "raw",
+            prepared, tmp_output / "raw",
             af2_data_dir=str(tmp_path / "databases"),
             af2_model_preset="multimer",
         )
@@ -136,14 +199,22 @@ class TestAlphaFoldAdapter:
         assert "--pdb_seqres_database_path" in cmd
         assert "--uniprot_database_path" in cmd
 
+    def test_validate_rejects_dna(self, dna_entity_list):
+        from predict_structure.adapters.alphafold import AlphaFoldAdapter
+
+        adapter = AlphaFoldAdapter()
+        with pytest.raises(ValueError, match="does not support.*dna"):
+            adapter.validate_entities(dna_entity_list)
+
 
 class TestESMFoldAdapter:
-    def test_build_command(self, sample_fasta, tmp_output):
+    def test_build_command(self, protein_entity_list, tmp_output):
         from predict_structure.adapters.esmfold import ESMFoldAdapter
 
         adapter = ESMFoldAdapter()
+        prepared = adapter.prepare_input(protein_entity_list, tmp_output)
         cmd = adapter.build_command(
-            sample_fasta, tmp_output / "raw",
+            prepared, tmp_output / "raw",
             num_recycles=8, device="cpu",
         )
 
@@ -154,13 +225,13 @@ class TestESMFoldAdapter:
         assert cmd[cmd.index("--num-recycles") + 1] == "8"
         assert "--cpu-only" in cmd
 
-    def test_msa_warning(self, sample_fasta, sample_a3m, tmp_output, caplog):
+    def test_msa_warning(self, protein_entity_list, sample_a3m, tmp_output, caplog):
         from predict_structure.adapters.esmfold import ESMFoldAdapter
         import logging
 
         with caplog.at_level(logging.WARNING):
             adapter = ESMFoldAdapter()
-            adapter.prepare_input(sample_fasta, tmp_output, msa_path=sample_a3m)
+            adapter.prepare_input(protein_entity_list, tmp_output, msa_path=sample_a3m)
 
         assert "does not use MSA" in caplog.text
 
@@ -175,6 +246,15 @@ class TestESMFoldAdapter:
         from predict_structure.adapters.esmfold import ESMFoldAdapter
 
         assert ESMFoldAdapter.requires_gpu is False
+
+    def test_validate_rejects_ligand(self):
+        from predict_structure.adapters.esmfold import ESMFoldAdapter
+
+        el = EntityList()
+        el.add(EntityType.LIGAND, "ATP")
+        adapter = ESMFoldAdapter()
+        with pytest.raises(ValueError, match="does not support"):
+            adapter.validate_entities(el)
 
 
 class TestAdapterRegistry:
