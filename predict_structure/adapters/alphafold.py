@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from predict_structure.adapters.base import BaseAdapter
+from predict_structure.converters import entities_to_fasta
+from predict_structure.entities import EntityList, EntityType
 from predict_structure.normalizers import normalize_alphafold_output
 
 logger = logging.getLogger(__name__)
@@ -25,23 +27,26 @@ class AlphaFoldAdapter(BaseAdapter):
     tool_name: str = "alphafold"
     supports_msa: bool = True
     requires_gpu: bool = True
+    supported_entities: frozenset[EntityType] = frozenset({EntityType.PROTEIN})
 
     def __init__(self) -> None:
         self._use_precomputed_msas: bool = False
 
     def prepare_input(
         self,
-        input_path: Path,
+        entity_list: EntityList,
         output_dir: Path,
         *,
         msa_path: Path | None = None,
         **kwargs: Any,
     ) -> Path:
-        """FASTA pass-through. Flag precomputed MSA directory if provided."""
+        """Convert entity list to plain FASTA. Flag precomputed MSA if provided."""
         if msa_path is not None and msa_path.is_dir():
             self._use_precomputed_msas = True
             logger.info("Using precomputed MSAs from %s", msa_path)
-        return input_path
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return entities_to_fasta(entity_list, output_dir / "input.fasta")
 
     def build_command(
         self,

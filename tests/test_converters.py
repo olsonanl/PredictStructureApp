@@ -3,6 +3,8 @@
 import pytest
 from pathlib import Path
 
+from predict_structure.entities import EntityList, EntityType
+
 
 class TestFastaToBoltzYaml:
     def test_single_chain(self, sample_fasta, tmp_output):
@@ -102,3 +104,137 @@ class TestStructureConversion:
         assert result == pdb_back
         assert pdb_back.exists()
         assert "ATOM" in pdb_back.read_text()
+
+
+class TestEntitiesToBoltzYaml:
+    def test_single_protein(self, protein_entity_list, tmp_output):
+        from predict_structure.converters import entities_to_boltz_yaml
+        import yaml
+
+        out = tmp_output / "input.yaml"
+        result = entities_to_boltz_yaml(protein_entity_list, out)
+        assert result == out
+        assert out.exists()
+
+        data = yaml.safe_load(out.read_text())
+        assert data["version"] == 1
+        assert len(data["sequences"]) == 1
+        assert "protein" in data["sequences"][0]
+        assert data["sequences"][0]["protein"]["id"] == "A"
+
+    def test_protein_with_ligand(self, multi_entity_list, tmp_output):
+        from predict_structure.converters import entities_to_boltz_yaml
+        import yaml
+
+        out = tmp_output / "input.yaml"
+        entities_to_boltz_yaml(multi_entity_list, out)
+
+        data = yaml.safe_load(out.read_text())
+        assert len(data["sequences"]) == 2
+        assert "protein" in data["sequences"][0]
+        assert "ligand" in data["sequences"][1]
+        assert data["sequences"][1]["ligand"]["ccd"] == "ATP"
+
+    def test_with_msa(self, protein_entity_list, tmp_output, sample_a3m):
+        from predict_structure.converters import entities_to_boltz_yaml
+        import yaml
+
+        out = tmp_output / "input.yaml"
+        entities_to_boltz_yaml(protein_entity_list, out, msa_path=sample_a3m)
+
+        data = yaml.safe_load(out.read_text())
+        assert "msa" in data["sequences"][0]["protein"]
+
+    def test_dna_entity(self, dna_entity_list, tmp_output):
+        from predict_structure.converters import entities_to_boltz_yaml
+        import yaml
+
+        out = tmp_output / "input.yaml"
+        entities_to_boltz_yaml(dna_entity_list, out)
+
+        data = yaml.safe_load(out.read_text())
+        assert "dna" in data["sequences"][0]
+
+    def test_smiles_entity(self, tmp_output):
+        from predict_structure.converters import entities_to_boltz_yaml
+        import yaml
+
+        el = EntityList()
+        el.add(EntityType.PROTEIN, "MKTIIAL")
+        el.add(EntityType.SMILES, "CCO")
+        out = tmp_output / "input.yaml"
+        entities_to_boltz_yaml(el, out)
+
+        data = yaml.safe_load(out.read_text())
+        assert "ligand" in data["sequences"][1]
+        assert data["sequences"][1]["ligand"]["smiles"] == "CCO"
+
+
+class TestEntitiesToChaiFasta:
+    def test_single_protein(self, protein_entity_list, tmp_output):
+        from predict_structure.converters import entities_to_chai_fasta
+
+        out = tmp_output / "input.fasta"
+        result = entities_to_chai_fasta(protein_entity_list, out)
+        assert result == out
+        assert out.exists()
+
+        content = out.read_text()
+        assert ">protein|name=A" in content
+        assert "TTCCPSIVAR" in content
+
+    def test_protein_with_ligand(self, multi_entity_list, tmp_output):
+        from predict_structure.converters import entities_to_chai_fasta
+
+        out = tmp_output / "input.fasta"
+        entities_to_chai_fasta(multi_entity_list, out)
+
+        content = out.read_text()
+        assert ">protein|name=A" in content
+        assert ">ligand|name=B" in content
+        assert "ATP" in content
+
+    def test_dna_entity(self, tmp_output):
+        from predict_structure.converters import entities_to_chai_fasta
+
+        el = EntityList()
+        el.add(EntityType.PROTEIN, "MKTIIAL")
+        el.add(EntityType.DNA, "ACGTACGT")
+        out = tmp_output / "input.fasta"
+        entities_to_chai_fasta(el, out)
+
+        content = out.read_text()
+        assert ">protein|name=A" in content
+        assert ">dna|name=B" in content
+
+
+class TestEntitiesToFasta:
+    def test_protein_only(self, protein_entity_list, tmp_output):
+        from predict_structure.converters import entities_to_fasta
+
+        out = tmp_output / "input.fasta"
+        result = entities_to_fasta(protein_entity_list, out)
+        assert result == out
+        assert out.exists()
+
+        content = out.read_text()
+        assert ">crambin" in content
+        assert "TTCCPSIVAR" in content
+
+    def test_skips_inline_entities(self, multi_entity_list, tmp_output):
+        from predict_structure.converters import entities_to_fasta
+
+        out = tmp_output / "input.fasta"
+        entities_to_fasta(multi_entity_list, out)
+
+        content = out.read_text()
+        assert "MKTIIAL" in content
+        assert "ATP" not in content
+
+    def test_no_fasta_entities_raises(self, tmp_output):
+        from predict_structure.converters import entities_to_fasta
+
+        el = EntityList()
+        el.add(EntityType.LIGAND, "ATP")
+        with pytest.raises(ValueError, match="No sequence entities"):
+            entities_to_fasta(el, tmp_output / "input.fasta")

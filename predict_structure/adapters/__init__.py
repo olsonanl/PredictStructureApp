@@ -1,5 +1,7 @@
 """Tool-specific adapters for structure prediction engines."""
 
+from __future__ import annotations
+
 from predict_structure.adapters.base import BaseAdapter
 from predict_structure.adapters.boltz import BoltzAdapter
 from predict_structure.adapters.chai import ChaiAdapter

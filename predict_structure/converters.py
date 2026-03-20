@@ -11,9 +11,14 @@ import logging
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+import yaml
 from Bio import SeqIO
 from Bio.PDB import MMCIFParser, MMCIFIO, PDBParser, PDBIO
+
+if TYPE_CHECKING:
+    from predict_structure.entities import EntityList
 
 logger = logging.getLogger(__name__)
 
@@ -39,14 +44,6 @@ def fasta_to_boltz_yaml(
     Returns:
         Path to the written YAML file.
     """
-    try:
-        import yaml
-    except ImportError:
-        raise RuntimeError(
-            "PyYAML is required for Boltz YAML conversion. "
-            "Install with: pip install predict-structure[boltz]"
-        )
-
     records = list(SeqIO.parse(str(fasta_path), "fasta"))
     if not records:
         raise ValueError(f"No sequences found in {fasta_path}")
@@ -169,3 +166,136 @@ def pdb_to_mmcif(pdb_path: Path, cif_path: Path) -> Path:
     cif_path.parent.mkdir(parents=True, exist_ok=True)
     io.save(str(cif_path))
     return cif_path
+
+
+# ---------------------------------------------------------------------------
+# Entity-based converters
+# ---------------------------------------------------------------------------
+
+def entities_to_boltz_yaml(
+    entity_list: EntityList,
+    output_path: Path,
+    msa_path: Path | None = None,
+) -> Path:
+    """Convert an EntityList to a Boltz-2 YAML input manifest.
+
+    Maps entity types to Boltz YAML sequence entries:
+      - protein → ``{protein: {id, sequence}}``
+      - dna → ``{dna: {id, sequence}}``
+      - rna → ``{rna: {id, sequence}}``
+      - ligand → ``{ligand: {ccd: code, id}}``
+      - smiles → ``{ligand: {smiles: value, id}}``
+      - glycan → ``{glycan: {id, sequence}}``
+
+    Args:
+        entity_list: Entities to include in the manifest.
+        output_path: Where to write the generated YAML file.
+        msa_path: Optional A3M MSA file to reference for protein entries.
+
+    Returns:
+        Path to the written YAML file.
+    """
+    from predict_structure.entities import EntityType
+
+    sequences = []
+    for entity in entity_list:
+        entry: dict = {"id": entity.chain_id}
+
+        if entity.entity_type == EntityType.PROTEIN:
+            entry["sequence"] = entity.value
+            if msa_path is not None:
+                entry["msa"] = str(msa_path.resolve())
+            sequences.append({"protein": entry})
+
+        elif entity.entity_type == EntityType.DNA:
+            entry["sequence"] = entity.value
+            sequences.append({"dna": entry})
+
+        elif entity.entity_type == EntityType.RNA:
+            entry["sequence"] = entity.value
+            sequences.append({"rna": entry})
+
+        elif entity.entity_type == EntityType.LIGAND:
+            entry["ccd"] = entity.value
+            sequences.append({"ligand": entry})
+
+        elif entity.entity_type == EntityType.SMILES:
+            entry["smiles"] = entity.value
+            sequences.append({"ligand": entry})
+
+        elif entity.entity_type == EntityType.GLYCAN:
+            entry["sequence"] = entity.value
+            sequences.append({"glycan": entry})
+
+    manifest = {"version": 1, "sequences": sequences}
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w") as f:
+        yaml.dump(manifest, f, default_flow_style=False, sort_keys=False)
+
+    logger.info("Wrote Boltz YAML with %d entity/ies to %s", len(entity_list), output_path)
+    return output_path
+
+
+def entities_to_chai_fasta(entity_list: EntityList, output_path: Path) -> Path:
+    """Convert an EntityList to a Chai-1 entity-typed FASTA file.
+
+    Chai-1 requires entity type annotations in FASTA headers::
+
+        >protein|name=A
+        MKTIIALSY...
+        >ligand|name=B
+        ATP
+
+    Args:
+        entity_list: Entities to include.
+        output_path: Where to write the typed FASTA file.
+
+    Returns:
+        Path to the written FASTA file.
+    """
+    from predict_structure.entities import EntityType
+
+    _TYPE_LABELS = {
+        EntityType.PROTEIN: "protein",
+        EntityType.DNA: "dna",
+        EntityType.RNA: "rna",
+        EntityType.LIGAND: "ligand",
+        EntityType.SMILES: "smiles",
+        EntityType.GLYCAN: "glycan",
+    }
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w") as f:
+        for entity in entity_list:
+            label = _TYPE_LABELS[entity.entity_type]
+            f.write(f">{label}|name={entity.chain_id}\n")
+            f.write(f"{entity.value}\n")
+
+    logger.info("Wrote Chai FASTA with %d entity/ies to %s", len(entity_list), output_path)
+    return output_path
+
+
+def entities_to_fasta(entity_list: EntityList, output_path: Path) -> Path:
+    """Convert an EntityList to a plain FASTA file (protein/DNA/RNA only).
+
+    Non-sequence entities (ligand, SMILES, glycan) are silently skipped.
+
+    Args:
+        entity_list: Entities to include.
+        output_path: Where to write the FASTA file.
+
+    Returns:
+        Path to the written FASTA file.
+    """
+    fasta_ents = entity_list.fasta_entities()
+    if not fasta_ents:
+        raise ValueError("No sequence entities (protein/DNA/RNA) to write")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w") as f:
+        for entity in fasta_ents:
+            f.write(f">{entity.name}\n{entity.value}\n")
+
+    logger.info("Wrote FASTA with %d sequence(s) to %s", len(fasta_ents), output_path)
+    return output_path

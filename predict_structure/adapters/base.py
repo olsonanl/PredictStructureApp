@@ -1,8 +1,12 @@
 """Abstract base adapter for structure prediction tools."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
+
+from predict_structure.entities import EntityList, EntityType
 
 
 class BaseAdapter(ABC):
@@ -26,19 +30,37 @@ class BaseAdapter(ABC):
     #: Whether this tool requires a GPU
     requires_gpu: bool = True
 
+    #: Entity types supported by this tool
+    supported_entities: frozenset[EntityType] = frozenset({EntityType.PROTEIN})
+
+    def validate_entities(self, entity_list: EntityList) -> None:
+        """Check that all entity types in the list are supported by this tool.
+
+        Raises:
+            ValueError: If any entity type is not in ``supported_entities``.
+        """
+        unsupported = entity_list.entity_types - self.supported_entities
+        if unsupported:
+            names = ", ".join(sorted(e.value for e in unsupported))
+            supported = ", ".join(sorted(e.value for e in self.supported_entities))
+            raise ValueError(
+                f"{self.tool_name} does not support entity type(s): {names}. "
+                f"Supported: {supported}"
+            )
+
     @abstractmethod
     def prepare_input(
         self,
-        input_path: Path,
+        entity_list: EntityList,
         output_dir: Path,
         *,
         msa_path: Path | None = None,
         **kwargs: Any,
     ) -> Path:
-        """Convert universal input (FASTA + optional MSA) to tool-native format.
+        """Convert entity list to tool-native input format.
 
         Args:
-            input_path: Path to input FASTA or tool-native file.
+            entity_list: Entities to predict (proteins, DNA, RNA, ligands, etc.).
             output_dir: Working directory for prepared files.
             msa_path: Optional MSA file (.a3m, .sto, .pqt).
 
