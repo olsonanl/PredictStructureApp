@@ -7,14 +7,28 @@ doc: |
   Inputs match the native esm-fold-hf CLI flags.
 
 requirements:
-  DockerRequirement:
-    dockerPull: dxkb/predict-structure-all:latest-gpu
+  InlineJavascriptRequirement: {}
   InitialWorkDirRequirement:
     listing:
       - $(inputs.sequences)
+  EnvVarRequirement:
+    envDef:
+      HF_HOME: $(inputs.model_cache_dir)
   ResourceRequirement:
     coresMin: 8
     ramMin: 32768
+
+hints:
+  DockerRequirement:
+    dockerPull: folding_260327.3.sif
+  gowe:Execution:
+    worker_group: esmfold
+  gowe:ResourceData:
+    datasets:
+      - id: esmfold
+        path: /scout/wf/gowe/cache/esmfold
+        size: 3GB
+        mode: prestage
 
 baseCommand: [/opt/conda-esmfold/bin/esm-fold-hf]
 
@@ -62,6 +76,11 @@ inputs:
       prefix: --fp16
     doc: "Use half-precision inference"
 
+  model_cache_dir:
+    type: string
+    default: /scout/wf/gowe/cache/hf
+    doc: "Local directory for model weights (HF_HOME)"
+
 outputs:
   predictions:
     type: Directory
@@ -73,3 +92,4 @@ stderr: esmfold.err
 
 $namespaces:
   cwltool: http://commonwl.org/cwltool#
+  gowe: https://github.com/wilke/GoWe#

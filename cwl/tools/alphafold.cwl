@@ -8,8 +8,6 @@ doc: |
 
 requirements:
   InlineJavascriptRequirement: {}
-  DockerRequirement:
-    dockerPull: dxkb/predict-structure-all:latest-gpu
   InitialWorkDirRequirement:
     listing:
       - $(inputs.fasta_paths)
@@ -21,10 +19,20 @@ requirements:
     ramMax: 98304
 
 hints:
+  DockerRequirement:
+    dockerPull: all-2026-0224b.sif
   cwltool:CUDARequirement:
     cudaVersionMin: "11.8"
     cudaDeviceCountMin: 1
     cudaDeviceCountMax: 1
+  gowe:Execution:
+    executor: worker
+  gowe:ResourceData:
+    datasets:
+      - id: alphafold
+        path: /local_databases/alphafold/databases
+        size: 2TB
+        mode: prestage
 
 baseCommand: [/opt/conda-alphafold/bin/python, /app/alphafold/run_alphafold.py]
 
@@ -44,6 +52,7 @@ inputs:
 
   data_dir:
     type: string
+    default: /local_databases/alphafold/databases
     inputBinding:
       prefix: --data_dir
     doc: "AlphaFold database directory (~2TB)"
@@ -77,6 +86,7 @@ inputs:
 
   use_gpu_relax:
     type: boolean?
+    default: false
     doc: "Use GPU for relaxation"
 
   use_precomputed_msas:
@@ -94,7 +104,7 @@ arguments:
   - prefix: --obsolete_pdbs_path
     valueFrom: $(inputs.data_dir + "/pdb_mmcif/obsolete.dat")
   # reduced_dbs → small_bfd
-  - valueFrom: |
+  - valueFrom: |-
       ${
         if (inputs.db_preset === "reduced_dbs" || !inputs.db_preset) {
           return "--small_bfd_database_path=" + inputs.data_dir + "/small_bfd/bfd-first_non_consensus_sequences.fasta";
@@ -102,14 +112,14 @@ arguments:
         return null;
       }
   # full_dbs → bfd + uniref30
-  - valueFrom: |
+  - valueFrom: |-
       ${
         if (inputs.db_preset === "full_dbs") {
           return "--bfd_database_path=" + inputs.data_dir + "/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt";
         }
         return null;
       }
-  - valueFrom: |
+  - valueFrom: |-
       ${
         if (inputs.db_preset === "full_dbs") {
           return "--uniref30_database_path=" + inputs.data_dir + "/uniref30/UniRef30_2021_03";
@@ -117,7 +127,7 @@ arguments:
         return null;
       }
   # monomer → pdb70
-  - valueFrom: |
+  - valueFrom: |-
       ${
         var preset = inputs.model_preset || "monomer";
         if (preset.indexOf("monomer") === 0) {
@@ -126,33 +136,33 @@ arguments:
         return null;
       }
   # multimer → pdb_seqres + uniprot
-  - valueFrom: |
+  - valueFrom: |-
       ${
         if (inputs.model_preset === "multimer") {
           return "--pdb_seqres_database_path=" + inputs.data_dir + "/pdb_seqres/pdb_seqres.txt";
         }
         return null;
       }
-  - valueFrom: |
+  - valueFrom: |-
       ${
         if (inputs.model_preset === "multimer") {
           return "--uniprot_database_path=" + inputs.data_dir + "/uniprot/uniprot.fasta";
         }
         return null;
       }
-  # use_gpu_relax (--use_gpu_relax=true/false syntax)
-  - valueFrom: |
+  # use_gpu_relax (absl boolean: --use_gpu_relax or --nouse_gpu_relax)
+  - valueFrom: |-
       ${
         if (inputs.use_gpu_relax !== null && inputs.use_gpu_relax !== undefined) {
-          return "--use_gpu_relax=" + inputs.use_gpu_relax;
+          return inputs.use_gpu_relax ? "--use_gpu_relax" : "--nouse_gpu_relax";
         }
         return null;
       }
-  # use_precomputed_msas
-  - valueFrom: |
+  # use_precomputed_msas (absl boolean)
+  - valueFrom: |-
       ${
         if (inputs.use_precomputed_msas !== null && inputs.use_precomputed_msas !== undefined) {
-          return "--use_precomputed_msas=" + inputs.use_precomputed_msas;
+          return inputs.use_precomputed_msas ? "--use_precomputed_msas" : "--nouse_precomputed_msas";
         }
         return null;
       }
@@ -168,3 +178,4 @@ stderr: alphafold.err
 
 $namespaces:
   cwltool: http://commonwl.org/cwltool#
+  gowe: https://github.com/wilke/GoWe#

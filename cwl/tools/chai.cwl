@@ -7,23 +7,35 @@ doc: |
   Inputs match the native chai-lab CLI flags.
 
 requirements:
-  DockerRequirement:
-    dockerPull: dxkb/predict-structure-all:latest-gpu
+  InlineJavascriptRequirement: {}
   InitialWorkDirRequirement:
     listing:
       - $(inputs.input_fasta)
   NetworkAccess:
     networkAccess: true
+  EnvVarRequirement:
+    envDef:
+      CHAI_DOWNLOADS_DIR: $(inputs.model_cache_dir)
   ResourceRequirement:
     coresMin: 8
     ramMin: 65536
     ramMax: 98304
 
 hints:
+  DockerRequirement:
+    dockerPull: all-2026-0224b.sif
   cwltool:CUDARequirement:
     cudaVersionMin: "11.8"
     cudaDeviceCountMin: 1
     cudaDeviceCountMax: 1
+  gowe:Execution:
+    executor: worker
+  gowe:ResourceData:
+    datasets:
+      - id: chai
+        path: /local_databases/chai
+        size: 30GB
+        mode: cache
 
 baseCommand: [/opt/conda-chai/bin/chai-lab, fold]
 
@@ -119,6 +131,11 @@ inputs:
       prefix: --recycle-msa-subsample
     doc: "MSA subsample per recycle"
 
+  model_cache_dir:
+    type: string
+    default: /local_databases/chai
+    doc: "Local directory for model weights"
+
 outputs:
   predictions:
     type: Directory
@@ -130,3 +147,4 @@ stderr: chai.err
 
 $namespaces:
   cwltool: http://commonwl.org/cwltool#
+  gowe: https://github.com/wilke/GoWe#

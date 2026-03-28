@@ -7,8 +7,6 @@ doc: |
   Inputs match the native boltz CLI flags.
 
 requirements:
-  DockerRequirement:
-    dockerPull: dxkb/predict-structure-all:latest-gpu
   InitialWorkDirRequirement:
     listing:
       - $(inputs.input_file)
@@ -20,10 +18,20 @@ requirements:
     ramMax: 98304
 
 hints:
+  DockerRequirement:
+    dockerPull: all-2026-0224b.sif
   cwltool:CUDARequirement:
     cudaVersionMin: "11.8"
     cudaDeviceCountMin: 1
     cudaDeviceCountMax: 1
+  gowe:Execution:
+    executor: worker
+  gowe:ResourceData:
+    datasets:
+      - id: boltz
+        path: /local_databases/boltz
+        size: 50GB
+        mode: cache
 
 baseCommand: [/opt/conda-boltz/bin/boltz, predict]
 
@@ -95,6 +103,13 @@ inputs:
       prefix: --write_full_pae
     doc: "Write full PAE matrix"
 
+  model_cache_dir:
+    type: string?
+    default: /local_databases/boltz
+    inputBinding:
+      prefix: --cache
+    doc: "Local directory for model weights"
+
 outputs:
   predictions:
     type: Directory
@@ -106,3 +121,4 @@ stderr: boltz.err
 
 $namespaces:
   cwltool: http://commonwl.org/cwltool#
+  gowe: https://github.com/wilke/GoWe#

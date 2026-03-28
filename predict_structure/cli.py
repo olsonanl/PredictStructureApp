@@ -465,7 +465,7 @@ def run_prediction(
     # 5. For docker backend: build volume mounts and rewrite host paths
     run_kwargs: dict = {
         "tool_name": adapter.tool_name,
-        "gpu": adapter.requires_gpu and shared["device"] != "cpu",
+        "gpu": shared["device"] != "cpu",
     }
 
     if backend == "docker":

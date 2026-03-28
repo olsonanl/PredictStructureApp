@@ -57,14 +57,14 @@ class TestPerToolCWLStructure:
 
     def test_has_docker_requirement(self, tool_and_doc):
         _, doc = tool_and_doc
-        reqs = doc["requirements"]
-        assert "DockerRequirement" in reqs
-        assert "dockerPull" in reqs["DockerRequirement"]
+        hints = doc.get("hints", {})
+        assert "DockerRequirement" in hints
+        assert "dockerPull" in hints["DockerRequirement"]
 
     def test_all_use_same_image(self, tool_and_doc):
         _, doc = tool_and_doc
-        image = doc["requirements"]["DockerRequirement"]["dockerPull"]
-        assert "predict-structure-all" in image
+        image = doc["hints"]["DockerRequirement"]["dockerPull"]
+        assert image.endswith(".sif")
 
     def test_has_input_file(self, tool_and_doc):
         tool, doc = tool_and_doc
