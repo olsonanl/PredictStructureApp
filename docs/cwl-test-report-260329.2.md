@@ -525,11 +525,25 @@ This may indicate model loading issues or parameter tuning needed.
 
 **Validation:** `cwltool --validate cwl/workflows/alphafold-report.cwl` → **valid CWL**
 
+**Execution:**
+```bash
+APPTAINER_NV=1 APPTAINERENV_CUDA_VISIBLE_DEVICES=6 \
+SINGULARITY_BIND="/scout:/scout,/local_databases:/local_databases" \
+cwltool --singularity --outdir /scout/tmp/test-E-D7-cwltool \
+  cwl/workflows/alphafold-report.cwl cwl/jobs/crambin-alphafold-report.yml
+```
+**Exit code:** 0
+**Wall time:** ~25 min
+**Key outputs:**
+- metadata.json: `{"tool": "alphafold", "runtime_seconds": 1515.1}`
+- crambin_report.html: 542,291 bytes
+- Full workflow completed: predict → select → report
+
 The D7 failures are GoWe-specific:
 - **Directory type:** cwltool correctly extracts `.path` from Directory objects when building command lines. GoWe serializes the full JSON object.
 - **Newline injection:** cwltool correctly evaluates YAML `|` literal blocks in valueFrom without trailing newlines. GoWe appends `\n` to return values.
 
-**Decision tree result:** GoWe fails, cwltool expected to pass → **GoWe bugs confirmed (#7, #8)**
+**Decision tree result:** GoWe fails, cwltool passes → **GoWe bugs confirmed (#7, #8)**
 
 ### E-A8: AlphaFold amber relax
 
