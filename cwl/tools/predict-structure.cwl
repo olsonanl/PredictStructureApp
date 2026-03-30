@@ -274,6 +274,111 @@ inputs:
         }
     doc: "Enable inference-time potentials (Boltz only) [default: false]"
 
+  # --- Chai-1 only ------------------------------------------------
+
+  no_esm_embeddings:
+    type: boolean?
+    default: false
+    inputBinding:
+      prefix: --no-esm-embeddings
+      position: 2
+      valueFrom: |
+        ${
+          if (inputs.tool === "chai") {
+            return self;
+          }
+          return null;
+        }
+    doc: "Disable ESM2 language model embeddings (Chai only) [default: false]"
+
+  use_templates_server:
+    type: boolean?
+    default: false
+    inputBinding:
+      prefix: --use-templates-server
+      position: 2
+      valueFrom: |
+        ${
+          if (inputs.tool === "chai") {
+            return self;
+          }
+          return null;
+        }
+    doc: "Use PDB template server (Chai only) [default: false]"
+
+  constraint_path:
+    type: File?
+    inputBinding:
+      prefix: --constraint-path
+      position: 2
+      valueFrom: |
+        ${
+          if (inputs.tool === "chai") {
+            return self;
+          }
+          return null;
+        }
+    doc: "Constraint JSON file (Chai only)"
+
+  template_hits_path:
+    type: File?
+    inputBinding:
+      prefix: --template-hits-path
+      position: 2
+      valueFrom: |
+        ${
+          if (inputs.tool === "chai") {
+            return self;
+          }
+          return null;
+        }
+    doc: "Pre-computed template hits file (Chai only)"
+
+  num_trunk_samples:
+    type: int?
+    default: 1
+    inputBinding:
+      prefix: --num-trunk-samples
+      position: 2
+      valueFrom: |
+        ${
+          if (inputs.tool === "chai") {
+            return self;
+          }
+          return null;
+        }
+    doc: "Trunk samples per prediction (Chai only) [default: 1]"
+
+  recycle_msa_subsample:
+    type: int?
+    default: 0
+    inputBinding:
+      prefix: --recycle-msa-subsample
+      position: 2
+      valueFrom: |
+        ${
+          if (inputs.tool === "chai") {
+            return self;
+          }
+          return null;
+        }
+    doc: "MSA subsample per recycle (Chai only) [default: 0 = all]"
+
+  no_low_memory:
+    type: boolean?
+    default: false
+    inputBinding:
+      prefix: --no-low-memory
+      position: 2
+      valueFrom: |
+        ${
+          if (inputs.tool === "chai") {
+            return self;
+          }
+          return null;
+        }
+    doc: "Disable low-memory mode (Chai only) [default: false]"
+
   # --- AlphaFold 2 options -----------------------------------------
 
   af2_data_dir:
