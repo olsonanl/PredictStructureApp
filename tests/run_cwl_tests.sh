@@ -675,7 +675,16 @@ print_summary() {
 # Report generation
 # =============================================================================
 generate_report() {
-    local report="${OUTDIR_BASE}/report.md"
+    # Determine next counter for today's date: cwl-test-report-YYMMDD.N.md
+    local date_tag
+    date_tag=$(date '+%y%m%d')
+    local counter=1
+    while [[ -f "${REPO_DIR}/docs/cwl-test-report-${date_tag}.${counter}.md" ]]; do
+        counter=$((counter + 1))
+    done
+    local report="${REPO_DIR}/docs/cwl-test-report-${date_tag}.${counter}.md"
+    # Also symlink from the output directory for convenience
+    ln -sf "$report" "${OUTDIR_BASE}/report.md" 2>/dev/null || true
     log "Generating report: $report"
 
     cat > "$report" <<HEADER
