@@ -431,6 +431,44 @@ run_phase_1() {
         "${CWL_TOOLS}/predict-structure.cwl" "${CWL_JOBS}/test-predict-multichain.yml" \
         "--protein.*--protein"
 
+    # ── B3: Tool-specific parameter coverage ─────────────────────────────
+    section "B3: Tool-Specific Parameter Coverage"
+
+    # Chai: all advanced options
+    run_print_command B3a \
+        "${CWL_TOOLS}/predict-structure.cwl" "${CWL_JOBS}/test-predict-chai-advanced.yml" \
+        "--no-esm-embeddings.*--use-templates-server|--use-templates-server.*--no-esm-embeddings"
+
+    # Chai: constraint + template paths
+    run_print_command B3b \
+        "${CWL_TOOLS}/predict-structure.cwl" "${CWL_JOBS}/test-predict-chai-constraints.yml" \
+        "--constraint-path"
+
+    # ESMFold: max_tokens_per_batch
+    run_print_command B3c \
+        "${CWL_TOOLS}/predict-structure.cwl" "${CWL_JOBS}/test-predict-esmfold-batch.yml" \
+        "--max-tokens-per-batch 512"
+
+    # Boltz: precomputed MSA file
+    run_print_command B3d \
+        "${CWL_TOOLS}/predict-structure.cwl" "${CWL_JOBS}/test-predict-boltz-msa-file.yml" \
+        "--msa.*crambin.a3m"
+
+    # Boltz: RNA entity
+    run_print_command B3e \
+        "${CWL_TOOLS}/predict-structure.cwl" "${CWL_JOBS}/test-predict-boltz-rna.yml" \
+        "--rna.*rna.fasta"
+
+    # Boltz: SMILES entity
+    run_print_command B3f \
+        "${CWL_TOOLS}/predict-structure.cwl" "${CWL_JOBS}/test-predict-boltz-smiles.yml" \
+        "--smiles"
+
+    # Boltz: glycan entity
+    run_print_command B3g \
+        "${CWL_TOOLS}/predict-structure.cwl" "${CWL_JOBS}/test-predict-boltz-glycan.yml" \
+        "--glycan MAN"
+
     # ── C2: Auto mode print-command ───────────────────────────────────────
     section "C2: Auto Mode print-command"
 

@@ -102,6 +102,29 @@ inputs:
     type: boolean?
     doc: "Enable potential terms (Boltz only)"
 
+  # --- Chai only options ---
+  no_esm_embeddings:
+    type: boolean?
+    doc: "Disable ESM2 language model embeddings (Chai only)"
+  use_templates_server:
+    type: boolean?
+    doc: "Use PDB template server (Chai only)"
+  constraint_path:
+    type: File?
+    doc: "Constraint JSON file (Chai only)"
+  template_hits_path:
+    type: File?
+    doc: "Pre-computed template hits file (Chai only)"
+  num_trunk_samples:
+    type: int?
+    doc: "Trunk samples per prediction (Chai only)"
+  recycle_msa_subsample:
+    type: int?
+    doc: "MSA subsample per recycle (Chai only)"
+  no_low_memory:
+    type: boolean?
+    doc: "Disable low-memory mode (Chai only)"
+
   # --- AlphaFold options ---
   af2_model_preset:
     type: string?
@@ -156,6 +179,13 @@ steps:
       use_msa_server: use_msa_server
       msa_server_url: msa_server_url
       use_potentials: use_potentials
+      no_esm_embeddings: no_esm_embeddings
+      use_templates_server: use_templates_server
+      constraint_path: constraint_path
+      template_hits_path: template_hits_path
+      num_trunk_samples: num_trunk_samples
+      recycle_msa_subsample: recycle_msa_subsample
+      no_low_memory: no_low_memory
       af2_model_preset: af2_model_preset
       af2_db_preset: af2_db_preset
       af2_max_template_date: af2_max_template_date

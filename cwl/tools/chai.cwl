@@ -132,6 +132,18 @@ inputs:
       prefix: --recycle-msa-subsample
     doc: "MSA subsample per recycle"
 
+  no_use_esm_embeddings:
+    type: boolean?
+    inputBinding:
+      prefix: --no-use-esm-embeddings
+    doc: "Disable ESM2 language model embeddings"
+
+  no_low_memory:
+    type: boolean?
+    inputBinding:
+      prefix: --no-low-memory
+    doc: "Disable low-memory mode"
+
   model_cache_dir:
     type: string
     default: /local_databases/chai
