@@ -26,17 +26,17 @@ WARNED=0
 
 pass() {
     echo -e "  ${GREEN}PASS${NC}: $1"
-    ((PASSED++))
+    PASSED=$((PASSED + 1))
 }
 
 fail() {
     echo -e "  ${RED}FAIL${NC}: $1"
-    ((FAILED++))
+    FAILED=$((FAILED + 1))
 }
 
 warn() {
     echo -e "  ${YELLOW}WARN${NC}: $1"
-    ((WARNED++))
+    WARNED=$((WARNED + 1))
 }
 
 # Parse arguments
@@ -214,7 +214,7 @@ fi
 # --- Summary ---
 echo ""
 echo "=========================================="
-TOTAL=$((PASSED + FAILED))
+TOTAL=$((PASSED + FAILED + WARNED))
 echo -e "Results: ${GREEN}${PASSED} passed${NC}, ${RED}${FAILED} failed${NC}, ${YELLOW}${WARNED} warnings${NC} (${TOTAL} checks)"
 
 if [[ "$FAILED" -gt 0 ]]; then

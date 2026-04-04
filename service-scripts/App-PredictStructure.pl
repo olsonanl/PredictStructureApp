@@ -43,6 +43,7 @@ use File::Basename;
 use File::Path qw(make_path);
 use File::Slurp;
 use File::Copy;
+use File::Find;
 use JSON;
 use Getopt::Long;
 use Try::Tiny;
@@ -94,8 +95,16 @@ sub preflight {
     print STDERR "Preflight command: @cmd\n" if $ENV{P3_DEBUG};
 
     # Execute and parse JSON output
-    my $json_out = `@cmd 2>/dev/null`;
-    my $rc = $? >> 8;
+    my $json_out = "";
+    my $rc;
+    if (open(my $fh, "-|", @cmd)) {
+        local $/;
+        $json_out = <$fh>;
+        close($fh);
+        $rc = $? >> 8;
+    } else {
+        $rc = 1;
+    }
 
     if ($rc != 0 || !$json_out) {
         # Fallback: use app_spec defaults
@@ -388,13 +397,21 @@ sub run_report {
 
     # Add tool-specific confidence files if available
     # Boltz / AlphaFold PAE
-    my @pae_files = glob("$output_dir/raw_output/**/pae_*.json $output_dir/raw_output/**/pae.json");
+    my @pae_files;
+    File::Find::find(
+        { wanted => sub { push @pae_files, $_ if /\bpae[_.].*\.json$/ }, no_chdir => 1 },
+        "$output_dir/raw_output"
+    ) if -d "$output_dir/raw_output";
     if (@pae_files) {
         push @cmd, "--pae", $pae_files[0];
     }
 
     # Chai scores
-    my @chai_scores = glob("$output_dir/raw_output/**/scores.*.npz");
+    my @chai_scores;
+    File::Find::find(
+        { wanted => sub { push @chai_scores, $_ if /scores\..*\.npz$/ }, no_chdir => 1 },
+        "$output_dir/raw_output"
+    ) if -d "$output_dir/raw_output";
     if (@chai_scores) {
         push @cmd, "--chai-scores", $chai_scores[0];
     }

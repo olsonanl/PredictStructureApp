@@ -67,13 +67,19 @@ inputs:
 
 outputs:
   report:
-    type: File
+    type: File?
     outputBinding:
       glob: $(inputs.output_name + ".html")
     doc: "HTML characterization report"
 
+  report_pdf:
+    type: File?
+    outputBinding:
+      glob: $(inputs.output_name + ".pdf")
+    doc: "PDF characterization report"
+
   report_json:
-    type: File
+    type: File?
     outputBinding:
       glob: $(inputs.output_name + ".json")
     doc: "JSON characterization data"
