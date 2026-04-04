@@ -208,6 +208,38 @@ output/
 GPU constraint: `A100|H100|H200` on `gpu2` partition.
 ESMFold can run on CPU (no GPU policy needed in preflight).
 
+## BV-BRC Service Script
+
+`service-scripts/App-PredictStructure.pl` bridges BV-BRC AppService to the Python CLI:
+
+```
+BV-BRC → App-PredictStructure.pl → predict-structure <tool> --protein ... → Python adapters → native tool
+```
+
+### Flow
+1. **preflight()** — calls `predict-structure preflight --tool <tool>` for resource estimates
+2. **run_app()** — downloads workspace files, runs prediction, generates report, uploads results
+
+### Key Details
+- Preflight delegates tool resolution + GPU decision to Python CLI `preflight` subcommand
+- MSA mode mapping: `none` → no flag, `server` → `--use-msa-server`, `upload` → `--msa <file>`
+- Binary path: `/opt/conda-predict/bin/predict-structure`
+- Backend: always `--backend subprocess` (inside container)
+- Report: `python -m protein_compare characterize output/model_1.pdb -o report --format html`
+- Upload: `p3-cp -r` with `--map-suffix` for file type mapping
+- Runtime in SECONDS (14400 = 4h)
+- `policy_data` for GPU scheduling (not deprecated `gpu => 1`)
+- No filesystem validation in preflight (volumes not mounted yet)
+
+### Preflight CLI
+```bash
+predict-structure preflight --tool esmfold --protein input.fasta
+# {"resolved_tool": "esmfold", "needs_gpu": false, "cpu": 8, "memory": "32G", "runtime": 3600}
+
+predict-structure preflight --tool boltz
+# {"resolved_tool": "boltz", "needs_gpu": true, "cpu": 8, "memory": "96G", ...}
+```
+
 ## Related Repositories
 
 - **dxkb** (project workspace): Per-tool apps (boltzApp, ChaiApp, AlphaFoldApp, ESMFoldApp, stabiliNNatorApp) — each is an independent repo

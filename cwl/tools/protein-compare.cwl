@@ -15,8 +15,8 @@ requirements:
 
 hints:
   DockerRequirement:
-    dockerPull: folding_compare_260329.sif
-    dockerImageId: /scout/containers/folding_compare_260329.sif
+    dockerPull: folding_compare_prod.sif
+    dockerImageId: /scout/containers/folding_compare_prod.sif
   ResourceRequirement:
     coresMin: 1
     ramMin: 4096
@@ -38,11 +38,14 @@ inputs:
     doc: "Output report name (without extension)"
 
   format:
-    type: string?
-    default: html
+    type:
+      - "null"
+      - type: enum
+        symbols: [html, pdf, json, both, all]
+    default: all
     inputBinding:
       prefix: --format
-    doc: "Report format (html or pdf)"
+    doc: "Report format (html, pdf, json, both, or all)"
 
   pae:
     type: File?
@@ -66,7 +69,14 @@ outputs:
   report:
     type: File
     outputBinding:
-      glob: $(inputs.output_name + "." + inputs.format)
+      glob: $(inputs.output_name + ".html")
+    doc: "HTML characterization report"
+
+  report_json:
+    type: File
+    outputBinding:
+      glob: $(inputs.output_name + ".json")
+    doc: "JSON characterization data"
 
 stdout: protein-compare.log
 stderr: protein-compare.err

@@ -881,5 +881,66 @@ def auto(protein, dna, rna, ligand, smiles, glycan, use_msa_server, **shared):
                    entity_inputs=entity_inputs, **shared)
 
 
+# ---------------------------------------------------------------------------
+# preflight subcommand
+# ---------------------------------------------------------------------------
+
+@main.command()
+@click.option("--tool", type=click.Choice(["auto", "boltz", "chai", "alphafold", "esmfold"]),
+              default="auto", help="Prediction tool (or 'auto' to resolve)")
+@click.option("--protein", type=click.Path(), default=None,
+              help="Protein FASTA file (used for auto-resolution)")
+@click.option("--msa", type=click.Path(), default=None,
+              help="MSA file (influences auto tool selection)")
+@click.option("--use-msa-server", is_flag=True, default=False,
+              help="MSA server available (influences auto tool selection)")
+@click.option("--device", type=click.Choice(["gpu", "cpu"]), default="gpu",
+              help="Compute device")
+def preflight(tool, protein, msa, use_msa_server, device):
+    """Return resource requirements as JSON for BV-BRC preflight.
+
+    Resolves 'auto' to a concrete tool and returns CPU, memory, runtime,
+    and GPU requirements. Does NOT run any prediction.
+
+    \b
+    Example:
+        predict-structure preflight --tool esmfold --protein input.fasta
+        predict-structure preflight --tool auto --protein input.fasta --use-msa-server
+    """
+    import json as _json
+
+    # Resolve tool
+    if tool == "auto":
+        if protein:
+            entity_list = _build_entity_list(
+                protein=(protein,), dna=(), rna=(), ligand=(), smiles=(), glycan=(),
+            )
+        else:
+            # Default to a single-protein entity for preflight estimation
+            entity_list = EntityList()
+            entity_list.add(EntityType.PROTEIN, "X", name="preflight_dummy")
+        resolved = _auto_select_tool(
+            entity_list,
+            device=device,
+            has_msa=msa is not None,
+            use_msa_server=use_msa_server,
+        )
+    else:
+        resolved = tool
+
+    # Get resource requirements from the adapter
+    adapter = get_adapter(resolved)
+    resources = adapter.preflight()
+
+    # Build output with resolved tool and GPU info
+    output = {
+        "resolved_tool": resolved,
+        "needs_gpu": adapter.requires_gpu,
+    }
+    output.update(resources)
+
+    click.echo(_json.dumps(output))
+
+
 if __name__ == "__main__":
     main()
