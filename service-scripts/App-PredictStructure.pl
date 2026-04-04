@@ -1,0 +1,546 @@
+#!/usr/bin/env perl
+
+=head1 NAME
+
+App-PredictStructure - BV-BRC AppService script for unified protein structure prediction
+
+=head1 SYNOPSIS
+
+    App-PredictStructure [--preflight] params.json
+
+=head1 DESCRIPTION
+
+This script implements the BV-BRC AppService interface for running protein
+structure predictions via the unified predict-structure Python CLI.
+It supports Boltz-2, Chai-1, AlphaFold 2, and ESMFold through a single
+entry point with automatic parameter mapping.
+
+The Perl script handles:
+
+=over
+
+=item * Workspace file download/upload
+
+=item * Parameter mapping from app_spec to CLI flags
+
+=item * Resource estimation via Python CLI preflight subcommand
+
+=item * Prediction execution via predict-structure CLI
+
+=item * Characterization report generation via protein_compare
+
+=item * Result upload to workspace
+
+=back
+
+=cut
+
+use strict;
+use warnings;
+use Carp::Always;
+use Data::Dumper;
+use File::Basename;
+use File::Path qw(make_path);
+use File::Slurp;
+use File::Copy;
+use File::Find;
+use JSON;
+use Getopt::Long;
+use Try::Tiny;
+use POSIX qw(strftime);
+
+use Bio::KBase::AppService::AppScript;
+
+$ENV{P3_LOG_LEVEL} //= 'INFO';
+
+my $script = Bio::KBase::AppService::AppScript->new(\&run_app, \&preflight);
+$script->run(\@ARGV);
+
+# ---------------------------------------------------------------------------
+# Preflight: resource estimation
+# ---------------------------------------------------------------------------
+
+=head2 preflight
+
+Estimate resource requirements by delegating to the Python CLI's
+C<preflight> subcommand. Returns a hash with cpu, memory, runtime,
+storage, and optional policy_data for GPU scheduling.
+
+ESMFold does not require a GPU, so policy_data is omitted for it.
+
+=cut
+
+sub preflight {
+    my ($app, $app_def, $raw_params, $params) = @_;
+
+    my $tool = $params->{tool} // "auto";
+
+    # Build preflight command
+    my $bin = find_predict_structure_binary();
+    my @cmd = ($bin, "preflight", "--tool", $tool);
+
+    # Add device hint if we can infer it
+    if ($tool eq "esmfold") {
+        push @cmd, "--device", "cpu";
+    }
+
+    # Add MSA context for auto-resolution
+    my $msa_mode = $params->{msa_mode} // "none";
+    if ($msa_mode eq "server") {
+        push @cmd, "--use-msa-server";
+    } elsif ($msa_mode eq "upload" && $params->{msa_file}) {
+        push @cmd, "--msa", "/dev/null";  # existence signal only; file not available in preflight
+    }
+
+    print STDERR "Preflight command: @cmd\n" if $ENV{P3_DEBUG};
+
+    # Execute and parse JSON output
+    my $json_out = "";
+    my $rc;
+    if (open(my $fh, "-|", @cmd)) {
+        local $/;
+        $json_out = <$fh>;
+        close($fh);
+        $rc = $? >> 8;
+    } else {
+        $rc = 1;
+    }
+
+    if ($rc != 0 || !$json_out) {
+        # Fallback: use app_spec defaults
+        print STDERR "Warning: preflight command failed (rc=$rc), using defaults\n";
+        return _default_preflight($tool);
+    }
+
+    my $resources;
+    try {
+        $resources = decode_json($json_out);
+    } catch {
+        print STDERR "Warning: failed to parse preflight JSON: $_\n";
+        return _default_preflight($tool);
+    };
+
+    my $result = {
+        cpu     => $resources->{cpu} // 8,
+        memory  => $resources->{memory} // "64G",
+        runtime => $resources->{runtime} // 14400,
+        storage => $resources->{storage} // "50G",
+    };
+
+    # Add GPU policy only if the tool needs it
+    if ($resources->{needs_gpu}) {
+        $result->{policy_data} = $resources->{policy_data} // {
+            gpu_count  => 1,
+            partition  => 'gpu2',
+            constraint => 'A100|H100|H200',
+        };
+    }
+
+    return $result;
+}
+
+sub _default_preflight {
+    my ($tool) = @_;
+
+    if ($tool eq "esmfold") {
+        return {
+            cpu     => 8,
+            memory  => "32G",
+            runtime => 3600,
+            storage => "50G",
+        };
+    }
+
+    return {
+        cpu     => 8,
+        memory  => "64G",
+        runtime => 14400,
+        storage => "50G",
+        policy_data => {
+            gpu_count  => 1,
+            partition  => 'gpu2',
+            constraint => 'A100|H100|H200',
+        },
+    };
+}
+
+# ---------------------------------------------------------------------------
+# Main execution
+# ---------------------------------------------------------------------------
+
+=head2 run_app
+
+Main execution function:
+
+1. Download input files from workspace
+2. Build and run predict-structure CLI command
+3. Generate characterization report via protein_compare
+4. Upload results to workspace
+
+=cut
+
+sub run_app {
+    my ($app, $app_def, $raw_params, $params) = @_;
+
+    print "Starting PredictStructure service\n";
+    print STDERR "Parameters: " . Dumper($params) . "\n" if $ENV{P3_DEBUG};
+
+    # Create working directories
+    my $work_dir = $ENV{P3_WORKDIR} // $ENV{TMPDIR} // "/tmp";
+    my $input_dir  = "$work_dir/input";
+    my $output_dir = "$work_dir/output";
+
+    make_path($input_dir, $output_dir);
+
+    # -----------------------------------------------------------------
+    # 1. Download input files from workspace
+    # -----------------------------------------------------------------
+
+    my $input_file = $params->{input_file};
+    die "Input file is required\n" unless $input_file;
+
+    print "Downloading input file: $input_file\n";
+    my $local_input = download_workspace_file($app, $input_file, $input_dir);
+
+    # Optional MSA file
+    my $local_msa;
+    if ($params->{msa_mode} && $params->{msa_mode} eq "upload" && $params->{msa_file}) {
+        print "Downloading MSA file: $params->{msa_file}\n";
+        $local_msa = download_workspace_file($app, $params->{msa_file}, $input_dir);
+    }
+
+    # -----------------------------------------------------------------
+    # 2. Build and run prediction command
+    # -----------------------------------------------------------------
+
+    my @cmd = build_command($params, $local_input, $output_dir, $local_msa);
+
+    print "Executing: " . join(" ", @cmd) . "\n";
+
+    my $rc = system(@cmd);
+    if ($rc != 0) {
+        my $exit_code = $rc >> 8;
+        die "Prediction failed with exit code: $exit_code\n";
+    }
+
+    print "Prediction completed successfully\n";
+
+    # -----------------------------------------------------------------
+    # 3. Generate characterization report
+    # -----------------------------------------------------------------
+
+    run_report($output_dir);
+
+    # -----------------------------------------------------------------
+    # 4. Upload results to workspace
+    # -----------------------------------------------------------------
+
+    my $output_folder = $app->result_folder();
+    die "Could not get result folder from app framework\n" unless $output_folder;
+
+    # Clean up trailing slashes/dots
+    $output_folder =~ s/\/+$//;
+    $output_folder =~ s/\/\.$//;
+
+    # Create unique subfolder
+    my $output_base = $params->{output_file} // "predict_structure_result";
+    my $timestamp = POSIX::strftime("%Y%m%d_%H%M%S", localtime);
+    my $task_id = $app->{task_id} // "unknown";
+    my $run_folder = "${output_base}_${timestamp}_${task_id}";
+    $output_folder = "$output_folder/$run_folder";
+
+    print "Uploading results to workspace: $output_folder\n";
+    upload_results($app, $output_dir, $output_folder);
+
+    print "PredictStructure job completed\n";
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# Command building
+# ---------------------------------------------------------------------------
+
+=head2 build_command
+
+Map app_spec parameters to predict-structure CLI flags.
+
+=cut
+
+sub build_command {
+    my ($params, $local_input, $output_dir, $local_msa) = @_;
+
+    my $bin = find_predict_structure_binary();
+    my $tool = $params->{tool} // "auto";
+
+    my @cmd = ($bin, $tool, "--protein", $local_input, "-o", $output_dir);
+
+    # Always use subprocess backend inside the container
+    push @cmd, "--backend", "subprocess";
+
+    # --- Shared options ---
+
+    if (my $n = $params->{num_samples}) {
+        push @cmd, "--num-samples", $n;
+    }
+
+    if (my $n = $params->{num_recycles}) {
+        push @cmd, "--num-recycles", $n;
+    }
+
+    if (defined $params->{seed}) {
+        push @cmd, "--seed", $params->{seed};
+    }
+
+    if (my $fmt = $params->{output_format}) {
+        push @cmd, "--output-format", $fmt;
+    }
+
+    # --- MSA options ---
+
+    my $msa_mode = $params->{msa_mode} // "none";
+
+    if ($msa_mode eq "server") {
+        push @cmd, "--use-msa-server";
+        if (my $url = $params->{msa_server_url}) {
+            push @cmd, "--msa-server-url", $url;
+        }
+    } elsif ($msa_mode eq "upload" && $local_msa) {
+        push @cmd, "--msa", $local_msa;
+    }
+
+    # --- Tool-specific options ---
+
+    # Boltz / Chai shared options
+    if ($tool eq "boltz" || $tool eq "chai") {
+        if (my $steps = $params->{sampling_steps}) {
+            push @cmd, "--sampling-steps", $steps;
+        }
+    }
+
+    # Boltz-specific
+    if ($tool eq "boltz") {
+        if ($params->{use_potentials}) {
+            push @cmd, "--use-potentials";
+        }
+    }
+
+    # AlphaFold-specific
+    if ($tool eq "alphafold") {
+        my $data_dir = $params->{af2_data_dir} // "/databases";
+        push @cmd, "--af2-data-dir", $data_dir;
+
+        if (my $preset = $params->{af2_model_preset}) {
+            push @cmd, "--af2-model-preset", $preset;
+        }
+        if (my $db = $params->{af2_db_preset}) {
+            push @cmd, "--af2-db-preset", $db;
+        }
+        if (my $date = $params->{af2_max_template_date}) {
+            push @cmd, "--af2-max-template-date", $date;
+        }
+    }
+
+    # ESMFold-specific
+    if ($tool eq "esmfold") {
+        push @cmd, "--device", "cpu"
+            unless _has_gpu();
+
+        if ($params->{fp16}) {
+            push @cmd, "--fp16";
+        }
+        if (my $cs = $params->{chunk_size}) {
+            push @cmd, "--chunk-size", $cs;
+        }
+        if (my $mt = $params->{max_tokens_per_batch}) {
+            push @cmd, "--max-tokens-per-batch", $mt;
+        }
+    }
+
+    return @cmd;
+}
+
+sub _has_gpu {
+    my $rc = system("nvidia-smi >/dev/null 2>&1");
+    return ($rc == 0);
+}
+
+# ---------------------------------------------------------------------------
+# Report generation
+# ---------------------------------------------------------------------------
+
+=head2 run_report
+
+Generate a characterization report from the best predicted structure
+using protein_compare. Non-fatal: prediction results are still uploaded
+if report generation fails.
+
+=cut
+
+sub run_report {
+    my ($output_dir) = @_;
+
+    my $model_pdb = "$output_dir/model_1.pdb";
+    unless (-f $model_pdb) {
+        print STDERR "Warning: model_1.pdb not found, skipping report generation\n";
+        return;
+    }
+
+    my $report_dir = "$output_dir/report";
+    make_path($report_dir);
+
+    my @cmd = (
+        "python", "-m", "protein_compare", "characterize",
+        $model_pdb,
+        "-o", $report_dir,
+        "--format", "all",
+    );
+
+    # Add tool-specific confidence files if available
+    # Boltz / AlphaFold PAE
+    my @pae_files;
+    File::Find::find(
+        { wanted => sub { push @pae_files, $_ if /\bpae[_.].*\.json$/ }, no_chdir => 1 },
+        "$output_dir/raw_output"
+    ) if -d "$output_dir/raw_output";
+    if (@pae_files) {
+        push @cmd, "--pae", $pae_files[0];
+    }
+
+    # Chai scores
+    my @chai_scores;
+    File::Find::find(
+        { wanted => sub { push @chai_scores, $_ if /scores\..*\.npz$/ }, no_chdir => 1 },
+        "$output_dir/raw_output"
+    ) if -d "$output_dir/raw_output";
+    if (@chai_scores) {
+        push @cmd, "--chai-scores", $chai_scores[0];
+    }
+
+    print "Generating characterization report: " . join(" ", @cmd) . "\n";
+
+    my $rc = system(@cmd);
+    if ($rc != 0) {
+        print STDERR "Warning: report generation failed (rc=" . ($rc >> 8) . "), continuing with upload\n";
+    } else {
+        print "Report generated successfully\n";
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Workspace helpers
+# ---------------------------------------------------------------------------
+
+=head2 download_workspace_file
+
+Download a file from the BV-BRC workspace to a local directory.
+
+=cut
+
+sub download_workspace_file {
+    my ($app, $ws_path, $local_dir) = @_;
+
+    my $basename = basename($ws_path);
+    my $local_path = "$local_dir/$basename";
+
+    if ($app && $app->can('workspace')) {
+        try {
+            $app->workspace->download_file($ws_path, $local_path, 1);
+        } catch {
+            die "Failed to download $ws_path: $_\n";
+        };
+    } else {
+        # Fallback for testing without workspace connection
+        if (-f $ws_path) {
+            copy($ws_path, $local_path) or die "Copy failed: $!\n";
+        } else {
+            die "File not found: $ws_path\n";
+        }
+    }
+
+    return $local_path;
+}
+
+=head2 upload_results
+
+Upload prediction results to the BV-BRC workspace using p3-cp.
+
+=cut
+
+sub upload_results {
+    my ($app, $local_dir, $ws_path) = @_;
+
+    my @mapping = (
+        '--map-suffix' => "txt=txt",
+        '--map-suffix' => "pdb=pdb",
+        '--map-suffix' => "cif=cif",
+        '--map-suffix' => "mmcif=mmcif",
+        '--map-suffix' => "json=json",
+        '--map-suffix' => "html=html",
+        '--map-suffix' => "npz=unspecified",
+        '--map-suffix' => "png=png",
+        '--map-suffix' => "svg=svg",
+        '--map-suffix' => "csv=csv",
+        '--map-suffix' => "fasta=protein_feature_fasta",
+        '--map-suffix' => "fa=protein_feature_fasta",
+        '--map-suffix' => "faa=protein_feature_fasta",
+    );
+
+    my @cmd = ("p3-cp", "--overwrite", "-r", @mapping, $local_dir, "ws:$ws_path");
+    print "Upload: @cmd\n";
+    my $rc = system(@cmd);
+    $rc == 0 or die "Error copying data to workspace\n";
+}
+
+# ---------------------------------------------------------------------------
+# Binary discovery
+# ---------------------------------------------------------------------------
+
+=head2 find_predict_structure_binary
+
+Locate the predict-structure Python CLI binary.
+
+Search order:
+1. predict-structure on PATH
+2. P3_PREDICT_STRUCTURE_PATH environment variable
+3. /opt/conda-predict/bin/predict-structure (container default)
+
+=cut
+
+sub find_predict_structure_binary {
+    my $binary = "predict-structure";
+
+    # Check PATH
+    if (my $path_env = $ENV{PATH}) {
+        for my $dir (split(/:/, $path_env)) {
+            next unless $dir;
+            my $full_path = "$dir/$binary";
+            if (-x $full_path && !-d $full_path) {
+                return $full_path;
+            }
+        }
+    }
+
+    # Check environment variable override
+    if (my $ps_path = $ENV{P3_PREDICT_STRUCTURE_PATH}) {
+        my $bin_path = "$ps_path/$binary";
+        if (-x $bin_path) {
+            return $bin_path;
+        }
+    }
+
+    # Container default
+    my $default = "/opt/conda-predict/bin/$binary";
+    return $default;
+}
+
+__END__
+
+=head1 AUTHOR
+
+BV-BRC Team
+
+=head1 LICENSE
+
+MIT License
+
+=cut

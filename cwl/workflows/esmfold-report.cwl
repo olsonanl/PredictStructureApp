@@ -42,9 +42,12 @@ inputs:
     default: report
     doc: "Output report name (without extension)"
   report_format:
-    type: string?
-    default: html
-    doc: "Report format (html or pdf)"
+    type:
+      - "null"
+      - type: enum
+        symbols: [html, pdf, json, both, all]
+    default: all
+    doc: "Report format (html, pdf, json, both, or all)"
 
 steps:
   predict:
@@ -71,7 +74,7 @@ steps:
       structure: extract/structure
       output_name: report_name
       format: report_format
-    out: [report]
+    out: [report, report_json]
 
 outputs:
   predictions:
@@ -85,4 +88,8 @@ outputs:
   characterization_report:
     type: File
     outputSource: report/report
-    doc: "Characterization report (HTML or PDF)"
+    doc: "HTML characterization report"
+  characterization_json:
+    type: File
+    outputSource: report/report_json
+    doc: "JSON characterization data"
