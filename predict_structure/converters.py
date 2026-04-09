@@ -130,8 +130,58 @@ def a3m_to_parquet(a3m_path: Path, output_path: Path) -> Path:
     return output_path
 
 
+def _patch_mmcif_occupancy(cif_path: Path) -> None:
+    """Add _atom_site.occupancy to a CIF file that's missing it.
+
+    Some tools (e.g. OpenFold 3 / biotite) produce CIF files without
+    the occupancy field.  BioPython's MMCIFParser requires it, so we
+    inject it in-place: add the header line after B_iso_or_equiv and
+    append "1.00" to each atom data row at the matching position.
+    """
+    text = cif_path.read_text()
+    if "_atom_site.occupancy" in text:
+        return
+
+    lines = text.split("\n")
+    out: list[str] = []
+    fields: list[str] = []
+    biso_idx = -1
+    in_header = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("_atom_site."):
+            in_header = True
+            fields.append(stripped.split()[0])
+            out.append(line)
+            if "B_iso_or_equiv" in stripped:
+                biso_idx = len(fields) - 1
+                out.append("_atom_site.occupancy ")
+            continue
+
+        if in_header and not stripped.startswith("_atom_site."):
+            in_header = False
+            if biso_idx == -1 and fields:
+                biso_idx = len(fields) - 1
+                out.append("_atom_site.occupancy ")
+
+        if fields and stripped and not stripped.startswith(("_", "#", "loop_", "data_")):
+            parts = line.split()
+            if len(parts) >= len(fields):
+                parts.insert(biso_idx + 1, "1.00")
+                out.append(" ".join(parts))
+                continue
+
+        out.append(line)
+
+    cif_path.write_text("\n".join(out))
+
+
 def mmcif_to_pdb(cif_path: Path, pdb_path: Path) -> Path:
     """Convert an mmCIF structure file to PDB format.
+
+    Patches missing _atom_site.occupancy (e.g. OpenFold 3 output) before
+    parsing, since BioPython's MMCIFParser requires this field.
 
     Args:
         cif_path: Input mmCIF file.
@@ -140,6 +190,7 @@ def mmcif_to_pdb(cif_path: Path, pdb_path: Path) -> Path:
     Returns:
         Path to the written PDB file.
     """
+    _patch_mmcif_occupancy(cif_path)
     parser = MMCIFParser(QUIET=True)
     structure = parser.get_structure("s", str(cif_path))
     io = PDBIO()
@@ -354,7 +405,6 @@ def entities_to_openfold_json(
         if entity.entity_type == EntityType.PROTEIN:
             chain["molecule_type"] = "protein"
             chain["sequence"] = entity.value
-            chain["use_msas"] = use_msas
             if msa_path is not None:
                 chain["main_msa_file_paths"] = [str(msa_path.resolve())]
         elif entity.entity_type == EntityType.DNA:
@@ -372,11 +422,14 @@ def entities_to_openfold_json(
 
         chains.append(chain)
 
+    query_entry: dict = {
+        "chains": chains,
+        "use_msas": use_msas,
+    }
+
     query = {
         "queries": {
-            query_name: {
-                "chains": chains,
-            }
+            query_name: query_entry,
         }
     }
 

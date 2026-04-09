@@ -187,7 +187,7 @@ class TestEntitiesToOpenFoldJson:
         assert chains[0]["molecule_type"] == "protein"
         assert chains[0]["chain_ids"] == "A"
         assert "TTCCPSIVAR" in chains[0]["sequence"]
-        assert chains[0]["use_msas"] is True
+        assert data["queries"]["prediction"]["use_msas"] is True
 
     def test_protein_with_ligand(self, multi_entity_list, tmp_output):
         from predict_structure.converters import entities_to_openfold_json
@@ -258,7 +258,7 @@ class TestEntitiesToOpenFoldJson:
 
         data = json.loads(out.read_text())
         chains = data["queries"]["prediction"]["chains"]
-        assert chains[0]["use_msas"] is False
+        assert data["queries"]["prediction"]["use_msas"] is False
 
     def test_custom_query_name(self, protein_entity_list, tmp_output):
         from predict_structure.converters import entities_to_openfold_json

@@ -83,7 +83,7 @@ class OpenFoldAdapter(BaseAdapter):
           --seed           → not directly mapped (OF3 uses --num-model-seeds)
           --device         → implicit (always GPU)
         """
-        from predict_structure.config import get_command
+        from predict_structure.config import get_command, get_data_dir
 
         cmd = [
             *get_command("openfold"),
@@ -103,10 +103,24 @@ class OpenFoldAdapter(BaseAdapter):
         use_templates = kwargs.get("use_templates", True)
         cmd.extend(["--use-templates", str(use_templates)])
 
-        # Checkpoint override
+        # Checkpoint: explicit path from data dir, or named checkpoint
         checkpoint = kwargs.get("checkpoint")
         if checkpoint:
             cmd.extend(["--inference-ckpt-name", checkpoint])
+        else:
+            # Auto-resolve checkpoint from data directory
+            try:
+                data_dir = get_data_dir("openfold")
+                ckpt = data_dir / "of3-p2-155k.pt"
+                if ckpt.exists():
+                    cmd.extend(["--inference-ckpt-path", str(ckpt)])
+            except (FileNotFoundError, KeyError):
+                pass  # Let OF3 use its default download location
+
+        # Runner YAML for platform-specific settings (e.g. H200 DeepSpeed fix)
+        runner_yaml = kwargs.get("runner_yaml")
+        if runner_yaml:
+            cmd.extend(["--runner-yaml", str(runner_yaml)])
 
         return cmd
 

@@ -507,6 +507,16 @@ def run_prediction(
         data_root = get_data_root()
         if data_root.exists():
             binds[str(data_root)] = str(data_root)
+        # Bind tool-specific data dir if it's outside data_root (absolute path)
+        try:
+            tool_data = get_data_dir(tool_name)
+            if tool_data.exists() and not str(tool_data).startswith(str(data_root)):
+                binds[str(tool_data)] = str(tool_data)
+        except (FileNotFoundError, KeyError):
+            pass
+        # Bind the output directory so the container can read/write it
+        output_resolved = str(output_path.resolve())
+        binds[output_resolved] = output_resolved
         run_kwargs["binds"] = binds
 
     cwl_output_subdir = raw_dir
@@ -833,10 +843,12 @@ def esmfold(protein, dna, rna, ligand, smiles, glycan,
 @optgroup.option("--use-msa-server/--no-msa-server", default=True, help="Use ColabFold MSA server [default: True]")
 @optgroup.option("--use-templates/--no-templates", default=True, help="Use template structures [default: True]")
 @optgroup.option("--checkpoint", default=None, help="Model checkpoint name (e.g. openfold3_p2_v1)")
+@optgroup.option("--runner-yaml", type=click.Path(exists=True), default=None,
+                 help="Runner YAML for advanced config (e.g. disable DeepSpeed for H200)")
 @backend_options
 def openfold(protein, dna, rna, ligand, smiles, glycan,
              num_diffusion_samples, num_model_seeds,
-             use_msa_server, use_templates, checkpoint, **shared):
+             use_msa_server, use_templates, checkpoint, runner_yaml, **shared):
     """Predict structure with OpenFold 3 (AF3-class, protein/DNA/RNA/ligands)."""
     entity_list = _build_entity_list(protein, dna, rna, ligand, smiles, glycan)
     extra = {
@@ -845,6 +857,7 @@ def openfold(protein, dna, rna, ligand, smiles, glycan,
         "use_msa_server": use_msa_server,
         "use_templates": use_templates,
         "checkpoint": checkpoint,
+        "runner_yaml": runner_yaml,
     }
     entity_inputs = {
         "protein": protein, "dna": dna, "rna": rna,
