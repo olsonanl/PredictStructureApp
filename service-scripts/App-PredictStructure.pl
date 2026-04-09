@@ -367,6 +367,12 @@ sub build_command {
         if (defined $params->{use_templates} && !$params->{use_templates}) {
             push @cmd, "--no-templates";
         }
+
+        # H200 requires disabling DeepSpeed evo_attention
+        my $runner = "$ENV{KB_MODULE_DIR}/test_data/openfold_bench/runner.yml";
+        if (-f $runner) {
+            push @cmd, "--runner-yaml", $runner;
+        }
     }
 
     return @cmd;
