@@ -347,3 +347,86 @@ def normalize_esmfold_output(raw_dir: Path, output_dir: Path) -> Path:
     write_confidence_json(output_dir, plddt_mean, None, per_residue)
     _copy_raw(raw_dir, output_dir)
     return output_dir
+
+
+def normalize_openfold_output(raw_dir: Path, output_dir: Path) -> Path:
+    """Normalize OpenFold 3 output to standardized layout.
+
+    Raw structure (OF3 nests under query_name/seed_N/):
+        raw_dir/<query_name>/seed_<N>/<query>_seed_<N>_sample_<M>_model.cif
+        raw_dir/<query_name>/seed_<N>/<query>_seed_<N>_sample_<M>_confidences.json
+        raw_dir/<query_name>/seed_<N>/<query>_seed_<N>_sample_<M>_confidences_aggregated.json
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Find the first query subdirectory
+    query_dirs = [d for d in raw_dir.iterdir() if d.is_dir() and d.name != "raw"]
+    if not query_dirs:
+        raise FileNotFoundError(f"No query output directories in {raw_dir}")
+    query_dir = query_dirs[0]
+
+    # Find the first seed subdirectory
+    seed_dirs = sorted(d for d in query_dir.iterdir() if d.is_dir() and d.name.startswith("seed_"))
+    if not seed_dirs:
+        raise FileNotFoundError(f"No seed_* directories in {query_dir}")
+    seed_dir = seed_dirs[0]
+
+    # Find model CIF files and select the best sample by ranking score
+    model_files = sorted(seed_dir.glob("*_model.cif"))
+    if not model_files:
+        raise FileNotFoundError(f"No *_model.cif files in {seed_dir}")
+
+    best_cif = model_files[0]
+    best_score = -float("inf")
+
+    for cif in model_files:
+        # Derive aggregated confidences filename from model filename
+        # e.g. prediction_seed_42_sample_1_model.cif
+        #    → prediction_seed_42_sample_1_confidences_aggregated.json
+        agg_path = cif.parent / cif.name.replace("_model.cif", "_confidences_aggregated.json")
+        if agg_path.exists():
+            agg_data = json.loads(agg_path.read_text())
+            score = agg_data.get("sample_ranking_score", -float("inf"))
+            if score > best_score:
+                best_score = score
+                best_cif = cif
+
+    # Copy best CIF → model_1.cif
+    cif_dst = output_dir / "model_1.cif"
+    shutil.copy2(str(best_cif), str(cif_dst))
+
+    # Convert CIF → PDB
+    mmcif_to_pdb(cif_dst, output_dir / "model_1.pdb")
+
+    # Extract confidence from aggregated JSON
+    stem = best_cif.name.replace("_model.cif", "")
+    agg_path = best_cif.parent / f"{stem}_confidences_aggregated.json"
+    conf_path = best_cif.parent / f"{stem}_confidences.json"
+
+    plddt_mean = 0.0
+    ptm = None
+    per_residue: list[float] = []
+
+    if agg_path.exists():
+        agg_data = json.loads(agg_path.read_text())
+        plddt_mean = float(agg_data.get("avg_plddt", 0.0))
+        ptm = agg_data.get("ptm")
+        if ptm is not None:
+            ptm = float(ptm)
+
+    # Per-residue pLDDT from detailed confidences JSON
+    if conf_path.exists():
+        conf_data = json.loads(conf_path.read_text())
+        plddt_raw = conf_data.get("plddt")
+        if plddt_raw is not None:
+            per_residue = [float(v) for v in plddt_raw]
+
+    # Fallback: extract per-residue pLDDT from PDB B-factors
+    if not per_residue:
+        per_residue = _extract_ca_bfactors(output_dir / "model_1.pdb")
+        if per_residue:
+            plddt_mean = sum(per_residue) / len(per_residue)
+
+    write_confidence_json(output_dir, plddt_mean, ptm, per_residue)
+    _copy_raw(raw_dir, output_dir)
+    return output_dir

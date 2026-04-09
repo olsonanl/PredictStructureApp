@@ -356,6 +356,19 @@ sub build_command {
         }
     }
 
+    # OpenFold 3-specific
+    if ($tool eq "openfold") {
+        if (my $samples = $params->{num_diffusion_samples}) {
+            push @cmd, "--num-diffusion-samples", $samples;
+        }
+        if (my $seeds = $params->{num_model_seeds}) {
+            push @cmd, "--num-model-seeds", $seeds;
+        }
+        if (defined $params->{use_templates} && !$params->{use_templates}) {
+            push @cmd, "--no-templates";
+        }
+    }
+
     return @cmd;
 }
 

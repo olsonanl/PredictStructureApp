@@ -44,7 +44,7 @@
 data_root: /local_databases
 
 container:
-  sif: file:///scout/containers/all-2026-0224b.sif
+  sif: file:///scout/containers/folding_260407.1.sif
 
 tools:
   boltz:
@@ -81,3 +81,12 @@ tools:
     data_dir: esmfold
     command:
       - /opt/conda-esmfold/bin/esm-fold-hf
+
+  openfold:
+    image: docker://openfoldconsortium/openfold3:stable
+    cwl: cwl/tools/openfold.cwl
+    conda_env: openfold
+    data_dir: /scout/data/openfold
+    command:
+      - /opt/conda-openfold/bin/run_openfold
+      - predict

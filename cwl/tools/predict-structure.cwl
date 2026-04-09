@@ -3,7 +3,7 @@ class: CommandLineTool
 
 label: "Unified Protein Structure Prediction"
 doc: |
-  Dispatches to Boltz-2, Chai-1, AlphaFold 2, or ESMFold via the
+  Dispatches to Boltz-2, OpenFold 3, Chai-1, AlphaFold 2, or ESMFold via the
   predict-structure CLI inside a single all-in-one container.
 
   Tool selection is a CWL enum input that maps to a CLI subcommand.
@@ -86,7 +86,7 @@ inputs:
   tool:
     type:
       type: enum
-      symbols: [boltz, chai, alphafold, esmfold, auto]
+      symbols: [boltz, openfold, chai, alphafold, esmfold, auto]
     inputBinding:
       position: -100
     doc: "Prediction tool to use (maps to CLI subcommand)"
@@ -490,6 +490,50 @@ inputs:
           return null;
         }
     doc: "Maximum tokens per batch (ESMFold only)"
+
+  # --- OpenFold 3 options -------------------------------------------
+
+  num_diffusion_samples:
+    type: int?
+    inputBinding:
+      prefix: --num-diffusion-samples
+      position: 2
+      valueFrom: |
+        ${
+          if (inputs.tool === "openfold") {
+            return self;
+          }
+          return null;
+        }
+    doc: "Number of diffusion samples (OpenFold only)"
+
+  num_model_seeds:
+    type: int?
+    inputBinding:
+      prefix: --num-model-seeds
+      position: 2
+      valueFrom: |
+        ${
+          if (inputs.tool === "openfold") {
+            return self;
+          }
+          return null;
+        }
+    doc: "Number of independent model seeds (OpenFold only)"
+
+  use_templates:
+    type: boolean?
+    inputBinding:
+      prefix: --use-templates
+      position: 2
+      valueFrom: |
+        ${
+          if (inputs.tool === "openfold") {
+            return self;
+          }
+          return null;
+        }
+    doc: "Use template structures (OpenFold only) [default: true]"
 
 # ===================================================================
 #  Outputs

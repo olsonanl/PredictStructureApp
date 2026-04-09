@@ -170,6 +170,107 @@ class TestEntitiesToBoltzYaml:
         assert data["sequences"][1]["ligand"]["smiles"] == "CCO"
 
 
+class TestEntitiesToOpenFoldJson:
+    def test_single_protein(self, protein_entity_list, tmp_output):
+        from predict_structure.converters import entities_to_openfold_json
+        import json
+
+        out = tmp_output / "query.json"
+        result = entities_to_openfold_json(protein_entity_list, out)
+        assert result == out
+        assert out.exists()
+
+        data = json.loads(out.read_text())
+        assert "queries" in data
+        chains = data["queries"]["prediction"]["chains"]
+        assert len(chains) == 1
+        assert chains[0]["molecule_type"] == "protein"
+        assert chains[0]["chain_ids"] == "A"
+        assert "TTCCPSIVAR" in chains[0]["sequence"]
+        assert chains[0]["use_msas"] is True
+
+    def test_protein_with_ligand(self, multi_entity_list, tmp_output):
+        from predict_structure.converters import entities_to_openfold_json
+        import json
+
+        out = tmp_output / "query.json"
+        entities_to_openfold_json(multi_entity_list, out)
+
+        data = json.loads(out.read_text())
+        chains = data["queries"]["prediction"]["chains"]
+        assert len(chains) == 2
+        assert chains[0]["molecule_type"] == "protein"
+        assert chains[1]["molecule_type"] == "ligand"
+        assert chains[1]["ccd_codes"] == ["ATP"]
+
+    def test_dna_entity(self, dna_entity_list, tmp_output):
+        from predict_structure.converters import entities_to_openfold_json
+        import json
+
+        out = tmp_output / "query.json"
+        entities_to_openfold_json(dna_entity_list, out)
+
+        data = json.loads(out.read_text())
+        chains = data["queries"]["prediction"]["chains"]
+        assert chains[0]["molecule_type"] == "dna"
+
+    def test_smiles_entity(self, tmp_output):
+        from predict_structure.converters import entities_to_openfold_json
+        import json
+
+        el = EntityList()
+        el.add(EntityType.PROTEIN, "MKTIIAL")
+        el.add(EntityType.SMILES, "CCO")
+        out = tmp_output / "query.json"
+        entities_to_openfold_json(el, out)
+
+        data = json.loads(out.read_text())
+        chains = data["queries"]["prediction"]["chains"]
+        assert chains[1]["molecule_type"] == "ligand"
+        assert chains[1]["smiles"] == "CCO"
+
+    def test_glycan_raises(self, tmp_output):
+        from predict_structure.converters import entities_to_openfold_json
+
+        el = EntityList()
+        el.add(EntityType.GLYCAN, "MAN")
+        with pytest.raises(ValueError, match="OpenFold 3 does not yet support glycan"):
+            entities_to_openfold_json(el, tmp_output / "query.json")
+
+    def test_with_msa(self, protein_entity_list, sample_a3m, tmp_output):
+        from predict_structure.converters import entities_to_openfold_json
+        import json
+
+        out = tmp_output / "query.json"
+        entities_to_openfold_json(protein_entity_list, out, msa_path=sample_a3m)
+
+        data = json.loads(out.read_text())
+        chains = data["queries"]["prediction"]["chains"]
+        assert "main_msa_file_paths" in chains[0]
+        assert str(sample_a3m) in chains[0]["main_msa_file_paths"][0]
+
+    def test_no_msa_server(self, protein_entity_list, tmp_output):
+        from predict_structure.converters import entities_to_openfold_json
+        import json
+
+        out = tmp_output / "query.json"
+        entities_to_openfold_json(protein_entity_list, out, use_msas=False)
+
+        data = json.loads(out.read_text())
+        chains = data["queries"]["prediction"]["chains"]
+        assert chains[0]["use_msas"] is False
+
+    def test_custom_query_name(self, protein_entity_list, tmp_output):
+        from predict_structure.converters import entities_to_openfold_json
+        import json
+
+        out = tmp_output / "query.json"
+        entities_to_openfold_json(protein_entity_list, out, query_name="my_query")
+
+        data = json.loads(out.read_text())
+        assert "my_query" in data["queries"]
+
+
 class TestEntitiesToChaiFasta:
     def test_single_protein(self, protein_entity_list, tmp_output):
         from predict_structure.converters import entities_to_chai_fasta

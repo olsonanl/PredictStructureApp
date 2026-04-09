@@ -299,3 +299,89 @@ def entities_to_fasta(entity_list: EntityList, output_path: Path) -> Path:
 
     logger.info("Wrote FASTA with %d sequence(s) to %s", len(fasta_ents), output_path)
     return output_path
+
+
+def entities_to_openfold_json(
+    entity_list: EntityList,
+    output_path: Path,
+    query_name: str = "prediction",
+    *,
+    msa_path: Path | None = None,
+    use_msas: bool = True,
+) -> Path:
+    """Convert an EntityList to an OpenFold 3 JSON query file.
+
+    OpenFold 3 requires a structured JSON input with explicit molecule types
+    and chain IDs. Each entity becomes one chain entry.
+
+    Entity type mapping:
+      - protein → ``{"molecule_type": "protein", "sequence": ...}``
+      - dna → ``{"molecule_type": "dna", "sequence": ...}``
+      - rna → ``{"molecule_type": "rna", "sequence": ...}``
+      - ligand → ``{"molecule_type": "ligand", "ccd_codes": [...]}``
+      - smiles → ``{"molecule_type": "ligand", "smiles": ...}``
+      - glycan → raises ValueError (not yet supported by OpenFold 3)
+
+    Args:
+        entity_list: Entities to include in the query.
+        output_path: Where to write the JSON file.
+        query_name: Name for the query entry (default: "prediction").
+        msa_path: Optional precomputed MSA file for protein chains.
+        use_msas: Whether to enable MSA lookups (default True = ColabFold).
+
+    Returns:
+        Path to the written JSON file.
+
+    Raises:
+        ValueError: If a GLYCAN entity is present (unsupported by OpenFold 3).
+    """
+    import json
+
+    from predict_structure.entities import EntityType
+
+    chains = []
+    for entity in entity_list:
+        if entity.entity_type == EntityType.GLYCAN:
+            raise ValueError(
+                "OpenFold 3 does not yet support glycan entities. "
+                "See https://github.com/aqlaboratory/openfold-3 for roadmap."
+            )
+
+        chain: dict = {
+            "chain_ids": entity.chain_id,
+        }
+
+        if entity.entity_type == EntityType.PROTEIN:
+            chain["molecule_type"] = "protein"
+            chain["sequence"] = entity.value
+            chain["use_msas"] = use_msas
+            if msa_path is not None:
+                chain["main_msa_file_paths"] = [str(msa_path.resolve())]
+        elif entity.entity_type == EntityType.DNA:
+            chain["molecule_type"] = "dna"
+            chain["sequence"] = entity.value
+        elif entity.entity_type == EntityType.RNA:
+            chain["molecule_type"] = "rna"
+            chain["sequence"] = entity.value
+        elif entity.entity_type == EntityType.LIGAND:
+            chain["molecule_type"] = "ligand"
+            chain["ccd_codes"] = [entity.value]
+        elif entity.entity_type == EntityType.SMILES:
+            chain["molecule_type"] = "ligand"
+            chain["smiles"] = entity.value
+
+        chains.append(chain)
+
+    query = {
+        "queries": {
+            query_name: {
+                "chains": chains,
+            }
+        }
+    }
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(query, indent=2))
+
+    logger.info("Wrote OpenFold 3 JSON with %d chain(s) to %s", len(chains), output_path)
+    return output_path

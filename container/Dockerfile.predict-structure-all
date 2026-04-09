@@ -85,6 +85,13 @@ RUN conda create -y -p /opt/conda-alphafold python=3.11 && \
     /opt/conda-alphafold/bin/pip install --no-cache-dir . && \
     conda clean -afy
 
+# --- OpenFold 3 ---
+# Model weights are pre-downloaded to /local_databases/openfold on the host
+# and bind-mounted at runtime (same pattern as Boltz/Chai/AlphaFold).
+RUN conda create -y -p /opt/conda-openfold python=3.11 && \
+    /opt/conda-openfold/bin/pip install --no-cache-dir openfold3 && \
+    conda clean -afy
+
 # ─── predict-structure CLI ────────────────────────────────────────────
 #
 # Installed into a dedicated env. This is what the user calls.
@@ -116,6 +123,7 @@ ENV BOLTZ_CACHE=/cache
 ENV CHAI_DOWNLOADS_DIR=/cache
 ENV HF_HOME=/cache/huggingface
 ENV TORCH_HOME=/cache/torch
+ENV OPENFOLD3_CACHE_DIR=/local_databases/openfold
 
 # ─── Entrypoint ───────────────────────────────────────────────────────
 

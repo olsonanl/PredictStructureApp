@@ -2,7 +2,7 @@
     "id": "PredictStructure",
     "script": "App-PredictStructure",
     "label": "Protein Structure Prediction",
-    "description": "Predict protein structures using Boltz-2, Chai-1, AlphaFold 2, or ESMFold. Provides a unified interface with automatic parameter mapping, format conversion, output normalization, and confidence scoring.",
+    "description": "Predict protein structures using Boltz-2, OpenFold 3, Chai-1, AlphaFold 2, or ESMFold. Provides a unified interface with automatic parameter mapping, format conversion, output normalization, and confidence scoring.",
     "default_memory": "64G",
     "default_cpu": 8,
     "default_runtime": 14400,
@@ -10,11 +10,11 @@
         {
             "id": "tool",
             "type": "enum",
-            "enum": ["auto", "boltz", "chai", "alphafold", "esmfold"],
+            "enum": ["auto", "boltz", "openfold", "chai", "alphafold", "esmfold"],
             "default": "auto",
             "required": 1,
             "label": "Prediction Tool",
-            "desc": "Structure prediction engine. 'auto' discovers the best available tool based on input format, device, and installed software. Boltz-2 and Chai-1 are diffusion-based with highest accuracy. AlphaFold 2 uses co-evolutionary features (requires database). ESMFold is fastest (single-sequence, no MSA, CPU-capable)."
+            "desc": "Structure prediction engine. 'auto' discovers the best available tool based on input format, device, and installed software. Boltz-2, OpenFold 3, and Chai-1 are diffusion-based with highest accuracy. OpenFold 3 is an open-source AF3 reproduction supporting protein/DNA/RNA/ligand complexes. AlphaFold 2 uses co-evolutionary features (requires database). ESMFold is fastest (single-sequence, no MSA, CPU-capable)."
         },
         {
             "id": "input_file",
@@ -153,6 +153,31 @@
             "required": 0,
             "label": "Max Tokens per Batch",
             "desc": "Maximum number of tokens (amino acids) per batch for multi-sequence input. ESMFold only."
+        },
+
+        {
+            "id": "num_diffusion_samples",
+            "type": "int",
+            "default": 5,
+            "required": 0,
+            "label": "Diffusion Samples",
+            "desc": "Number of diffusion samples per query. OpenFold 3 only. Default: 5."
+        },
+        {
+            "id": "num_model_seeds",
+            "type": "int",
+            "default": 1,
+            "required": 0,
+            "label": "Model Seeds",
+            "desc": "Number of independent model seeds. OpenFold 3 only. Default: 1."
+        },
+        {
+            "id": "use_templates",
+            "type": "bool",
+            "default": true,
+            "required": 0,
+            "label": "Use Templates",
+            "desc": "Use PDB template structures for improved accuracy. OpenFold 3 only. Default: true."
         },
 
         {

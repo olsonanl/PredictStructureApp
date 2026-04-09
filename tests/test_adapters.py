@@ -257,11 +257,117 @@ class TestESMFoldAdapter:
             adapter.validate_entities(el)
 
 
+class TestOpenFoldAdapter:
+    def test_build_command_defaults(self, protein_entity_list, tmp_output):
+        from predict_structure.adapters.openfold import OpenFoldAdapter
+
+        adapter = OpenFoldAdapter()
+        prepared = adapter.prepare_input(protein_entity_list, tmp_output)
+        cmd = adapter.build_command(prepared, tmp_output / "raw")
+
+        assert cmd[0].endswith("run_openfold")
+        assert cmd[1] == "predict"
+        assert "--query-json" in cmd
+        assert "--output-dir" in cmd
+        assert "--num-diffusion-samples" in cmd
+        assert cmd[cmd.index("--num-diffusion-samples") + 1] == "1"
+        assert "--use-msa-server" in cmd
+
+    def test_build_command_custom(self, protein_entity_list, tmp_output):
+        from predict_structure.adapters.openfold import OpenFoldAdapter
+
+        adapter = OpenFoldAdapter()
+        prepared = adapter.prepare_input(protein_entity_list, tmp_output)
+        cmd = adapter.build_command(
+            prepared, tmp_output / "raw",
+            num_samples=5, num_recycles=3,
+            num_diffusion_samples=10, num_model_seeds=3,
+            use_msa_server=False, use_templates=False,
+            checkpoint="openfold3_p2_v1",
+        )
+
+        assert cmd[cmd.index("--num-diffusion-samples") + 1] == "10"
+        assert cmd[cmd.index("--num-model-seeds") + 1] == "3"
+        assert cmd[cmd.index("--use-msa-server") + 1] == "False"
+        assert cmd[cmd.index("--use-templates") + 1] == "False"
+        assert "--inference-ckpt-name" in cmd
+        assert cmd[cmd.index("--inference-ckpt-name") + 1] == "openfold3_p2_v1"
+
+    def test_prepare_input_creates_json(self, protein_entity_list, tmp_output):
+        from predict_structure.adapters.openfold import OpenFoldAdapter
+        import json
+
+        adapter = OpenFoldAdapter()
+        result = adapter.prepare_input(protein_entity_list, tmp_output)
+        assert result.suffix == ".json"
+        assert result.exists()
+
+        data = json.loads(result.read_text())
+        assert "queries" in data
+        chains = data["queries"]["prediction"]["chains"]
+        assert len(chains) == 1
+        assert chains[0]["molecule_type"] == "protein"
+
+    def test_prepare_input_multi_entity(self, multi_entity_list, tmp_output):
+        from predict_structure.adapters.openfold import OpenFoldAdapter
+        import json
+
+        adapter = OpenFoldAdapter()
+        result = adapter.prepare_input(multi_entity_list, tmp_output)
+
+        data = json.loads(result.read_text())
+        chains = data["queries"]["prediction"]["chains"]
+        assert len(chains) == 2
+        assert chains[0]["molecule_type"] == "protein"
+        assert chains[1]["molecule_type"] == "ligand"
+        assert chains[1]["ccd_codes"] == ["ATP"]
+
+    def test_supported_entities(self):
+        from predict_structure.adapters.openfold import OpenFoldAdapter
+
+        adapter = OpenFoldAdapter()
+        assert EntityType.PROTEIN in adapter.supported_entities
+        assert EntityType.DNA in adapter.supported_entities
+        assert EntityType.RNA in adapter.supported_entities
+        assert EntityType.LIGAND in adapter.supported_entities
+        assert EntityType.SMILES in adapter.supported_entities
+        assert EntityType.GLYCAN not in adapter.supported_entities
+
+    def test_validate_entities_ok(self, multi_entity_list):
+        from predict_structure.adapters.openfold import OpenFoldAdapter
+
+        adapter = OpenFoldAdapter()
+        adapter.validate_entities(multi_entity_list)  # should not raise
+
+    def test_validate_rejects_glycan(self):
+        from predict_structure.adapters.openfold import OpenFoldAdapter
+
+        el = EntityList()
+        el.add(EntityType.GLYCAN, "MAN")
+        adapter = OpenFoldAdapter()
+        with pytest.raises(ValueError, match="does not support"):
+            adapter.validate_entities(el)
+
+    def test_preflight(self):
+        from predict_structure.adapters.openfold import OpenFoldAdapter
+
+        pf = OpenFoldAdapter().preflight()
+        assert pf["cpu"] == 8
+        assert pf["memory"] == "96G"
+        assert "policy_data" in pf
+        assert pf["policy_data"]["gpu_count"] == 1
+
+    def test_requires_gpu(self):
+        from predict_structure.adapters.openfold import OpenFoldAdapter
+
+        assert OpenFoldAdapter.requires_gpu is True
+
+
 class TestAdapterRegistry:
     def test_get_adapter_all_tools(self):
         from predict_structure.adapters import get_adapter
 
-        for tool in ["boltz", "chai", "alphafold", "esmfold"]:
+        for tool in ["boltz", "chai", "alphafold", "esmfold", "openfold"]:
             adapter = get_adapter(tool)
             assert adapter.tool_name == tool
 

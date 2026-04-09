@@ -105,12 +105,13 @@ def _auto_select_tool(
             return "esmfold"
 
     # Accuracy-priority order
-    for tool in ("boltz", "chai", "alphafold", "esmfold"):
+    for tool in ("boltz", "openfold", "chai", "alphafold", "esmfold"):
         # Skip tools that don't support the entity types
         if tool in ("alphafold", "esmfold") and has_non_protein:
             continue
 
         # Boltz/Chai need an MSA source to produce good results
+        # OpenFold has built-in ColabFold MSA server, so skip MSA check
         if tool in ("boltz", "chai") and not msa_available:
             continue
 
@@ -122,7 +123,7 @@ def _auto_select_tool(
 
     raise click.UsageError(
         "No prediction tool found on PATH. "
-        "Install one of: boltz, chai-lab, run_alphafold.py, esm-fold-hf"
+        "Install one of: boltz, run_openfold, chai-lab, run_alphafold.py, esm-fold-hf"
     )
 
 
@@ -156,7 +157,7 @@ def discover_tool(input_file: Path, device: str = "gpu") -> str:
         # Fall through to general priority
 
     # Accuracy-priority order
-    for tool in ("boltz", "chai", "alphafold", "esmfold"):
+    for tool in ("boltz", "openfold", "chai", "alphafold", "esmfold"):
         if tool == "alphafold":
             if _is_tool_available(tool) and AF2_DEFAULT_DATA_DIR.is_dir():
                 return tool
@@ -165,7 +166,7 @@ def discover_tool(input_file: Path, device: str = "gpu") -> str:
 
     raise click.UsageError(
         "No prediction tool found on PATH. "
-        "Install one of: boltz, chai-lab, run_alphafold.py, esm-fold-hf"
+        "Install one of: boltz, run_openfold, chai-lab, run_alphafold.py, esm-fold-hf"
     )
 
 
@@ -664,7 +665,7 @@ def _run_job_file(job_path: Path, base_output_dir: Path | None) -> None:
               help="Enable verbose logging (DEBUG level)")
 @click.pass_context
 def main(ctx, job, job_output_dir, verbose):
-    """Predict protein structure using Boltz-2, Chai-1, AlphaFold 2, or ESMFold.
+    """Predict protein structure using Boltz-2, OpenFold 3, Chai-1, AlphaFold 2, or ESMFold.
 
     Each subcommand dispatches to the appropriate prediction tool with
     automatic parameter mapping, input format conversion, and output
@@ -821,6 +822,39 @@ def esmfold(protein, dna, rna, ligand, smiles, glycan,
 
 
 # ---------------------------------------------------------------------------
+# openfold subcommand
+# ---------------------------------------------------------------------------
+
+@main.command()
+@shared_options
+@optgroup.group("OpenFold 3 options")
+@optgroup.option("--num-diffusion-samples", type=int, default=5, help="Diffusion samples per query [default: 5]")
+@optgroup.option("--num-model-seeds", type=int, default=1, help="Independent model seeds [default: 1]")
+@optgroup.option("--use-msa-server/--no-msa-server", default=True, help="Use ColabFold MSA server [default: True]")
+@optgroup.option("--use-templates/--no-templates", default=True, help="Use template structures [default: True]")
+@optgroup.option("--checkpoint", default=None, help="Model checkpoint name (e.g. openfold3_p2_v1)")
+@backend_options
+def openfold(protein, dna, rna, ligand, smiles, glycan,
+             num_diffusion_samples, num_model_seeds,
+             use_msa_server, use_templates, checkpoint, **shared):
+    """Predict structure with OpenFold 3 (AF3-class, protein/DNA/RNA/ligands)."""
+    entity_list = _build_entity_list(protein, dna, rna, ligand, smiles, glycan)
+    extra = {
+        "num_diffusion_samples": num_diffusion_samples,
+        "num_model_seeds": num_model_seeds,
+        "use_msa_server": use_msa_server,
+        "use_templates": use_templates,
+        "checkpoint": checkpoint,
+    }
+    entity_inputs = {
+        "protein": protein, "dna": dna, "rna": rna,
+        "ligand": ligand, "smiles": smiles, "glycan": glycan,
+    }
+    run_prediction("openfold", extra, entity_list=entity_list,
+                   entity_inputs=entity_inputs, **shared)
+
+
+# ---------------------------------------------------------------------------
 # auto subcommand
 # ---------------------------------------------------------------------------
 
@@ -829,6 +863,7 @@ def esmfold(protein, dna, rna, ligand, smiles, glycan,
 # to provide tool-specific flags.
 _AUTO_DEFAULTS: dict[str, dict] = {
     "boltz": {},
+    "openfold": {},
     "chai": {},
     "alphafold": {
         "af2_data_dir": str(AF2_DEFAULT_DATA_DIR),
@@ -856,8 +891,8 @@ def auto(protein, dna, rna, ligand, smiles, glycan, use_msa_server, **shared):
     in favor of AlphaFold or ESMFold.
 
     \b
-    Priority order (GPU, MSA available):  Boltz > Chai > AlphaFold > ESMFold
-    Priority order (GPU, no MSA):         AlphaFold > ESMFold
+    Priority order (GPU, MSA available):  Boltz > OpenFold > Chai > AlphaFold > ESMFold
+    Priority order (GPU, no MSA):         OpenFold > AlphaFold > ESMFold
     Priority order (CPU):                 ESMFold > others
     Non-protein entities:                 AlphaFold and ESMFold excluded
     """
@@ -886,7 +921,7 @@ def auto(protein, dna, rna, ligand, smiles, glycan, use_msa_server, **shared):
 # ---------------------------------------------------------------------------
 
 @main.command()
-@click.option("--tool", type=click.Choice(["auto", "boltz", "chai", "alphafold", "esmfold"]),
+@click.option("--tool", type=click.Choice(["auto", "boltz", "openfold", "chai", "alphafold", "esmfold"]),
               default="auto", help="Prediction tool (or 'auto' to resolve)")
 @click.option("--protein", type=click.Path(), default=None,
               help="Protein FASTA file (used for auto-resolution)")

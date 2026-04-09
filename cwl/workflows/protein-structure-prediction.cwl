@@ -15,7 +15,7 @@ inputs:
   tool:
     type:
       type: enum
-      symbols: [boltz, chai, alphafold, esmfold, auto]
+      symbols: [boltz, openfold, chai, alphafold, esmfold, auto]
     doc: "Prediction tool to use"
 
   # --- Entity inputs ---
@@ -147,6 +147,17 @@ inputs:
     type: int?
     doc: "Max tokens per batch (ESMFold)"
 
+  # --- OpenFold 3 options ---
+  num_diffusion_samples:
+    type: int?
+    doc: "Number of diffusion samples (OpenFold only)"
+  num_model_seeds:
+    type: int?
+    doc: "Number of independent model seeds (OpenFold only)"
+  use_templates:
+    type: boolean?
+    doc: "Use template structures (OpenFold only)"
+
   # --- Report options ---
   report_name:
     type: string
@@ -195,6 +206,9 @@ steps:
       fp16: fp16
       chunk_size: chunk_size
       max_tokens_per_batch: max_tokens_per_batch
+      num_diffusion_samples: num_diffusion_samples
+      num_model_seeds: num_model_seeds
+      use_templates: use_templates
     out: [predictions]
 
   extract:

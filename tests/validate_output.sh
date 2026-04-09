@@ -154,7 +154,7 @@ import json, sys
 data = json.load(open('$OUTPUT_DIR/metadata.json'))
 assert 'tool' in data, 'missing tool'
 assert 'runtime_seconds' in data, 'missing runtime_seconds'
-assert data['tool'] in ('boltz', 'chai', 'alphafold', 'esmfold'), f'unknown tool: {data[\"tool\"]}'
+assert data['tool'] in ('boltz', 'chai', 'alphafold', 'esmfold', 'openfold'), f'unknown tool: {data[\"tool\"]}'
 " 2>/dev/null; then
         TOOL=$(python3 -c "import json; print(json.load(open('$OUTPUT_DIR/metadata.json'))['tool'])")
         RUNTIME=$(python3 -c "import json; print(json.load(open('$OUTPUT_DIR/metadata.json'))['runtime_seconds'])")
