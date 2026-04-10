@@ -110,9 +110,10 @@ def _auto_select_tool(
         if tool in ("alphafold", "esmfold") and has_non_protein:
             continue
 
-        # Boltz/Chai need an MSA source to produce good results
-        # OpenFold has built-in ColabFold MSA server, so skip MSA check
-        if tool in ("boltz", "chai") and not msa_available:
+        # Boltz/Chai benefit from MSAs for protein sequences, but
+        # DNA/RNA/ligand-only inputs don't need MSAs at all.
+        has_protein = EntityType.PROTEIN in entity_list.entity_types
+        if tool in ("boltz", "chai") and has_protein and not msa_available:
             continue
 
         if tool == "alphafold":
