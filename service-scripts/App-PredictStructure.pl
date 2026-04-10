@@ -196,11 +196,54 @@ sub run_app {
     # 1. Download input files from workspace
     # -----------------------------------------------------------------
 
-    my $input_file = $params->{input_file};
-    die "Input file is required\n" unless $input_file;
+    # Resolve input: either input_file (workspace) or text_input (inline)
+    my @input_flags;  # list of [flag, path] pairs for predict-structure
 
-    print "Downloading input file: $input_file\n";
-    my $local_input = download_workspace_file($app, $input_file, $input_dir);
+    if ($params->{input_file}) {
+        print "Downloading input file: $params->{input_file}\n";
+        my $local_input = download_workspace_file($app, $params->{input_file}, $input_dir);
+        push @input_flags, ["--protein", $local_input];
+    }
+    elsif ($params->{text_input} && ref($params->{text_input}) eq 'ARRAY') {
+        # Group entries by type, write each group to a file
+        my %by_type;
+        my $entry_idx = 0;
+        for my $entry (@{$params->{text_input}}) {
+            my $seq_type = $entry->{type} // "auto";
+            my $seq_text = $entry->{sequence} // "";
+            next unless $seq_text =~ /\S/;
+
+            # Add FASTA header if missing
+            if ($seq_text !~ /^>/) {
+                $seq_text = ">sequence_${entry_idx}\n${seq_text}";
+            }
+            push @{$by_type{$seq_type}}, $seq_text;
+            $entry_idx++;
+        }
+
+        # Write grouped files and map to CLI flags
+        my %type_flag = (
+            protein => "--protein",
+            dna     => "--dna",
+            rna     => "--rna",
+            auto    => "--sequence",
+        );
+
+        for my $type (keys %by_type) {
+            my $filename = "${type}.fasta";
+            my $filepath = "$input_dir/$filename";
+            open(my $fh, ">", $filepath) or die "Cannot write $filepath: $!\n";
+            print $fh join("\n", @{$by_type{$type}}) . "\n";
+            close($fh);
+
+            my $flag = $type_flag{$type} // "--sequence";
+            push @input_flags, [$flag, $filepath];
+            print "Wrote text_input ($type): $filepath\n";
+        }
+    }
+    else {
+        die "Either input_file or text_input is required\n";
+    }
 
     # Optional MSA file
     my $local_msa;
@@ -213,7 +256,7 @@ sub run_app {
     # 2. Build and run prediction command
     # -----------------------------------------------------------------
 
-    my @cmd = build_command($params, $local_input, $output_dir, $local_msa);
+    my @cmd = build_command($params, \@input_flags, $output_dir, $local_msa);
 
     print "Executing: " . join(" ", @cmd) . "\n";
 
@@ -267,12 +310,19 @@ Map app_spec parameters to predict-structure CLI flags.
 =cut
 
 sub build_command {
-    my ($params, $local_input, $output_dir, $local_msa) = @_;
+    my ($params, $input_flags, $output_dir, $local_msa) = @_;
 
     my $bin = find_predict_structure_binary();
     my $tool = $params->{tool} // "auto";
 
-    my @cmd = ($bin, $tool, "--protein", $local_input, "-o", $output_dir);
+    my @cmd = ($bin, $tool);
+
+    # Add input flags (e.g. --protein file.fasta, --dna dna.fasta, --sequence auto.fasta)
+    for my $pair (@$input_flags) {
+        push @cmd, $pair->[0], $pair->[1];
+    }
+
+    push @cmd, "-o", $output_dir;
 
     # Always use subprocess backend inside the container
     push @cmd, "--backend", "subprocess";

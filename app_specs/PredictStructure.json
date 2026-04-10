@@ -19,9 +19,37 @@
         {
             "id": "input_file",
             "type": "wsfile",
-            "required": 1,
+            "required": 0,
             "label": "Input File",
-            "desc": "Protein sequence in FASTA format (.fasta, .fa). Maximum 26 sequences and 10,000 total residues per job. Boltz also accepts YAML for full feature support (ligands, constraints, templates)."
+            "desc": "Protein sequence in FASTA format (.fasta, .fa). Maximum 26 sequences and 10,000 total residues per job. Boltz also accepts YAML for full feature support (ligands, constraints, templates). Alternative to text_input."
+        },
+        {
+            "id": "text_input",
+            "type": "list",
+            "required": 0,
+            "label": "Sequence Text Input",
+            "desc": "One or more sequences as text. Each entry has an optional type (protein, dna, rna, or auto for auto-detection) and a sequence in FASTA format. Alternative to input_file.",
+            "item": {
+                "id": "entry",
+                "type": "object",
+                "properties": [
+                    {
+                        "id": "type",
+                        "type": "enum",
+                        "enum": ["auto", "protein", "dna", "rna"],
+                        "default": "auto",
+                        "label": "Sequence Type",
+                        "desc": "Molecule type. Use 'auto' to auto-detect from sequence characters."
+                    },
+                    {
+                        "id": "sequence",
+                        "type": "string",
+                        "required": 1,
+                        "label": "Sequence",
+                        "desc": "Sequence in FASTA format (with >header line) or bare sequence."
+                    }
+                ]
+            }
         },
         {
             "id": "num_samples",

@@ -183,6 +183,7 @@ def _build_entity_list(
     smiles: tuple[str, ...],
     glycan: tuple[str, ...],
     *,
+    sequence_files: tuple[str, ...] = (),
     force: bool = False,
 ) -> EntityList:
     """Build an EntityList from CLI option tuples.
@@ -226,6 +227,13 @@ def _build_entity_list(
         ):
             entities.add(ent.entity_type, ent.value, name=ent.name)
 
+    # Auto-detect sequence type (no explicit_type — uses detect_sequence_type)
+    for fasta_path in sequence_files:
+        for ent in parse_fasta_entities(
+            Path(fasta_path), explicit_type=None, max_sequences=max_seq,
+        ):
+            entities.add(ent.entity_type, ent.value, name=ent.name)
+
     for code in ligand:
         entities.add(EntityType.LIGAND, code, name=code)
 
@@ -238,7 +246,7 @@ def _build_entity_list(
     if not entities:
         raise click.UsageError(
             "No input entities provided. Use --protein, --dna, --rna, "
-            "--ligand, --smiles, or --glycan to specify input."
+            "--sequence, --ligand, --smiles, or --glycan to specify input."
         )
 
     # Validate total size
@@ -263,6 +271,8 @@ def entity_options(func):
                      help="DNA FASTA file (repeatable)")
     @optgroup.option("--rna", multiple=True, type=click.Path(exists=True),
                      help="RNA FASTA file (repeatable)")
+    @optgroup.option("--sequence", "sequence_files", multiple=True, type=click.Path(exists=True),
+                     help="FASTA file with auto-detected sequence type (repeatable)")
     @optgroup.option("--ligand", multiple=True, type=str,
                      help="Ligand CCD code (repeatable)")
     @optgroup.option("--smiles", multiple=True, type=str,
@@ -675,6 +685,7 @@ def _run_job_file(job_path: Path, base_output_dir: Path | None) -> None:
             "ligand": job.get("ligands", []),
             "smiles": job.get("smiles", []),
             "glycan": job.get("glycans", []),
+            "sequence": job.get("sequence", []),
         }
 
         extra = {k: v for k, v in options.items() if k not in shared}
@@ -734,7 +745,7 @@ def main(ctx, job, job_output_dir, verbose):
 def boltz(protein, dna, rna, ligand, smiles, glycan,
           sampling_steps, use_msa_server, msa_server_url, use_potentials, **shared):
     """Predict structure with Boltz-2 (diffusion-based, proteins/DNA/RNA/ligands)."""
-    entity_list = _build_entity_list(protein, dna, rna, ligand, smiles, glycan, force=shared.get("force", False))
+    entity_list = _build_entity_list(protein, dna, rna, ligand, smiles, glycan, sequence_files=shared.get("sequence_files", ()), force=shared.get("force", False))
     extra = {
         "sampling_steps": sampling_steps,
         "use_msa_server": use_msa_server or (msa_server_url is not None),
@@ -744,6 +755,7 @@ def boltz(protein, dna, rna, ligand, smiles, glycan,
     entity_inputs = {
         "protein": protein, "dna": dna, "rna": rna,
         "ligand": ligand, "smiles": smiles, "glycan": glycan,
+        "sequence": shared.get("sequence_files", ()),
     }
     run_prediction("boltz", extra, entity_list=entity_list,
                    entity_inputs=entity_inputs, **shared)
@@ -773,7 +785,7 @@ def chai(protein, dna, rna, ligand, smiles, glycan,
          template_hits_path, num_trunk_samples, recycle_msa_subsample,
          no_low_memory, **shared):
     """Predict structure with Chai-1 (diffusion-based protein prediction)."""
-    entity_list = _build_entity_list(protein, dna, rna, ligand, smiles, glycan, force=shared.get("force", False))
+    entity_list = _build_entity_list(protein, dna, rna, ligand, smiles, glycan, sequence_files=shared.get("sequence_files", ()), force=shared.get("force", False))
     extra = {
         "sampling_steps": sampling_steps,
         "use_msa_server": use_msa_server or (msa_server_url is not None),
@@ -789,6 +801,7 @@ def chai(protein, dna, rna, ligand, smiles, glycan,
     entity_inputs = {
         "protein": protein, "dna": dna, "rna": rna,
         "ligand": ligand, "smiles": smiles, "glycan": glycan,
+        "sequence": shared.get("sequence_files", ()),
     }
     run_prediction("chai", extra, entity_list=entity_list,
                    entity_inputs=entity_inputs, **shared)
@@ -809,7 +822,7 @@ def chai(protein, dna, rna, ligand, smiles, glycan,
 def alphafold(protein, dna, rna, ligand, smiles, glycan,
               af2_data_dir, af2_model_preset, af2_db_preset, af2_max_template_date, **shared):
     """Predict structure with AlphaFold 2 (MSA-based, high accuracy)."""
-    entity_list = _build_entity_list(protein, dna, rna, ligand, smiles, glycan, force=shared.get("force", False))
+    entity_list = _build_entity_list(protein, dna, rna, ligand, smiles, glycan, sequence_files=shared.get("sequence_files", ()), force=shared.get("force", False))
     extra = {
         "af2_data_dir": af2_data_dir,
         "af2_model_preset": af2_model_preset,
@@ -819,6 +832,7 @@ def alphafold(protein, dna, rna, ligand, smiles, glycan,
     entity_inputs = {
         "protein": protein, "dna": dna, "rna": rna,
         "ligand": ligand, "smiles": smiles, "glycan": glycan,
+        "sequence": shared.get("sequence_files", ()),
     }
     run_prediction("alphafold", extra, entity_list=entity_list,
                    entity_inputs=entity_inputs, **shared)
@@ -838,7 +852,7 @@ def alphafold(protein, dna, rna, ligand, smiles, glycan,
 def esmfold(protein, dna, rna, ligand, smiles, glycan,
             fp16, chunk_size, max_tokens_per_batch, **shared):
     """Predict structure with ESMFold (single-sequence, no MSA needed, CPU-capable)."""
-    entity_list = _build_entity_list(protein, dna, rna, ligand, smiles, glycan, force=shared.get("force", False))
+    entity_list = _build_entity_list(protein, dna, rna, ligand, smiles, glycan, sequence_files=shared.get("sequence_files", ()), force=shared.get("force", False))
     extra = {
         "esm_fp16": fp16,
         "esm_chunk_size": chunk_size,
@@ -847,6 +861,7 @@ def esmfold(protein, dna, rna, ligand, smiles, glycan,
     entity_inputs = {
         "protein": protein, "dna": dna, "rna": rna,
         "ligand": ligand, "smiles": smiles, "glycan": glycan,
+        "sequence": shared.get("sequence_files", ()),
     }
     run_prediction("esmfold", extra, entity_list=entity_list,
                    entity_inputs=entity_inputs, **shared)
@@ -871,7 +886,7 @@ def openfold(protein, dna, rna, ligand, smiles, glycan,
              num_diffusion_samples, num_model_seeds,
              use_msa_server, use_templates, checkpoint, runner_yaml, **shared):
     """Predict structure with OpenFold 3 (AF3-class, protein/DNA/RNA/ligands)."""
-    entity_list = _build_entity_list(protein, dna, rna, ligand, smiles, glycan, force=shared.get("force", False))
+    entity_list = _build_entity_list(protein, dna, rna, ligand, smiles, glycan, sequence_files=shared.get("sequence_files", ()), force=shared.get("force", False))
     extra = {
         "num_diffusion_samples": num_diffusion_samples,
         "num_model_seeds": num_model_seeds,
@@ -883,6 +898,7 @@ def openfold(protein, dna, rna, ligand, smiles, glycan,
     entity_inputs = {
         "protein": protein, "dna": dna, "rna": rna,
         "ligand": ligand, "smiles": smiles, "glycan": glycan,
+        "sequence": shared.get("sequence_files", ()),
     }
     run_prediction("openfold", extra, entity_list=entity_list,
                    entity_inputs=entity_inputs, **shared)
@@ -930,7 +946,7 @@ def auto(protein, dna, rna, ligand, smiles, glycan, use_msa_server, **shared):
     Priority order (CPU):                 ESMFold > others
     Non-protein entities:                 AlphaFold and ESMFold excluded
     """
-    entity_list = _build_entity_list(protein, dna, rna, ligand, smiles, glycan, force=shared.get("force", False))
+    entity_list = _build_entity_list(protein, dna, rna, ligand, smiles, glycan, sequence_files=shared.get("sequence_files", ()), force=shared.get("force", False))
     tool_name = _auto_select_tool(
         entity_list,
         device=shared.get("device", "gpu"),
@@ -945,6 +961,7 @@ def auto(protein, dna, rna, ligand, smiles, glycan, use_msa_server, **shared):
     entity_inputs = {
         "protein": protein, "dna": dna, "rna": rna,
         "ligand": ligand, "smiles": smiles, "glycan": glycan,
+        "sequence": shared.get("sequence_files", ()),
     }
     run_prediction(tool_name, extra, entity_list=entity_list,
                    entity_inputs=entity_inputs, **shared)
