@@ -66,6 +66,22 @@ hints:
     cudaVersionMin: "11.8"
     cudaDeviceCountMin: 1
     cudaDeviceCountMax: 1
+  gowe:Execution:
+    executor: worker
+  gowe:ResourceData:
+    datasets:
+      - id: boltz
+        path: /local_databases/boltz
+        size: 50GB
+        mode: cache
+      - id: chai
+        path: /local_databases/chai
+        size: 30GB
+        mode: cache
+      - id: openfold
+        path: /local_databases/openfold
+        size: 10GB
+        mode: cache
 
 baseCommand: [predict-structure]
 
