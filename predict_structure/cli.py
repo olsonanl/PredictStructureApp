@@ -814,7 +814,7 @@ def chai(protein, dna, rna, ligand, smiles, glycan,
 @main.command()
 @shared_options
 @optgroup.group("AlphaFold 2 options")
-@optgroup.option("--af2-data-dir", type=click.Path(), required=True, help="AlphaFold database directory (~2TB)")
+@optgroup.option("--af2-data-dir", type=click.Path(), default=None, help="AlphaFold database directory [default: from tools.yml]")
 @optgroup.option("--af2-model-preset", default="monomer", help="Model preset (monomer, monomer_casp14, multimer)")
 @optgroup.option("--af2-db-preset", default="reduced_dbs", help="DB preset (reduced_dbs, full_dbs)")
 @optgroup.option("--af2-max-template-date", default="2022-01-01", help="Max template date (YYYY-MM-DD)")
