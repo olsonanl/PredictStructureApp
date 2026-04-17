@@ -130,3 +130,44 @@ Improvements in 260411.1:
 - **HF cache**: `/local_databases/cache/hub/`
 - **Workspace token**: `~/.patric_token`
 - **GPU pinning**: `--gpu-id 0,1,2,3`
+
+---
+
+## Multi-Tool Comparison Workflow
+
+**Workflow:** `cwl/workflows/multi-tool-comparison.cwl`
+
+Runs Boltz, OpenFold, Chai, ESMFold on the same input, renames outputs
+with tool suffix (model_1.boltz.pdb), and runs protein_compare batch.
+
+### Test Run: sub_9d67ceb8 (crambin, 2026-04-17)
+
+| Step | Status | Notes |
+|------|--------|-------|
+| predict_boltz | SUCCESS | |
+| predict_openfold | SUCCESS | |
+| predict_chai | SUCCESS | |
+| predict_esmfold | SUCCESS | |
+| compare | SUCCESS | Only compared 2 of 4 structures (see issue #14) |
+
+**Rename working:** CSV shows `model_1.boltz` vs `model_1.esmfold` (tool names visible).
+
+### Issue #14: GoWe compare step runs before all predictions complete
+
+The compare step started as soon as 2 of 4 rename outputs were available,
+rather than waiting for all 4. The CWL workflow correctly declares compare's
+input as a merge of all 4 rename outputs (`linkMerge: merge_flattened`), but
+GoWe appears to dispatch the step as soon as any subset of sources is ready.
+
+**Impact:** Comparison report only includes tools that finished before the
+compare step was dispatched. Missing tools are not in the CSV/HTML output.
+
+**Expected:** Compare step should wait for all 4 rename steps to complete
+before running, producing a 4-way (6-pair) comparison.
+
+**Workaround:** None currently. Re-running compare manually with all 4 PDBs
+after the full workflow completes would produce the correct report.
+
+**Root cause:** Likely a GoWe issue with `linkMerge: merge_flattened` across
+multiple source steps. The CWL spec requires all sources to be resolved before
+the step can execute.
