@@ -278,3 +278,88 @@ shows skip reasons).
 Protein chains need an explicit `msa` field. Our converter sets `msa: empty`
 when no MSA file is provided (single-sequence mode). If testing native Boltz
 directly, either provide an MSA file or use `msa: empty` in the YAML.
+
+## Container Build
+
+The folding container is built in stages using apptainer definition files
+from the runtime_build repository at
+`/home/wilke/Development/runtime_build/gpu-builds/cuda-12.2-cudnn-8.9.6/`:
+
+1. `base-build.def` -- CUDA + cuDNN + miniforge
+2. `reqts-boltz.def` -- Boltz 2
+3. `reqts-chai.def` -- Chai 1
+4. `reqts-alphafold.def` -- AlphaFold 2
+5. `reqts-openfold.def` -- OpenFold 3
+6. `reqts-esmfold.def` -- ESMFold
+7. `reqts-predict-structure.def` -- predict-structure CLI (from GitHub)
+8. `reqts-bvbrc-service.def` -- BV-BRC AppService layer (final production SIF)
+
+### Build Flags (required on this host)
+
+Two flags are required because `wilke` is not in `/etc/subuid`/`/etc/subgid`:
+
+```bash
+--fakeroot                      # required for %post script
+APPTAINER_TMPDIR=/scout/tmp    # default /tmp is too small (50GB) for 33GB SIF extraction
+```
+
+### Build Command Template
+
+```bash
+APPTAINER_TMPDIR=/scout/tmp apptainer build --fakeroot \
+  --build-arg base=<previous_stage>.sif \
+  <output>.sif \
+  /home/wilke/Development/runtime_build/gpu-builds/cuda-12.2-cudnn-8.9.6/reqts-<tool>.def
+```
+
+For the BV-BRC service layer (final stage), add `app_repo`:
+
+```bash
+APPTAINER_TMPDIR=/scout/tmp apptainer build --fakeroot \
+  --build-arg base=/scout/containers/base-gpu.YYYY-MM-DD.NNN.sif \
+  --build-arg app_repo=https://github.com/CEPI-dxkb/PredictStructureApp.git \
+  /scout/containers/folding_YYMMDD.N.sif \
+  /home/wilke/Development/runtime_build/gpu-builds/cuda-12.2-cudnn-8.9.6/reqts-bvbrc-service.def
+```
+
+### Exact Build for folding_260422.1.sif
+
+Built 2026-04-22 14:57 CDT from `base-gpu.2026-04-22.002.sif` via
+`reqts-bvbrc-service.def`. Based on the def file recovered from the SIF:
+
+```bash
+APPTAINER_TMPDIR=/scout/tmp apptainer build --fakeroot \
+  --build-arg base=/scout/tmp/base-gpu.2026-04-22.002.sif \
+  --build-arg app_repo=https://github.com/CEPI-dxkb/PredictStructureApp.git \
+  /scout/containers/folding_260422.1.sif \
+  /home/wilke/Development/runtime_build/gpu-builds/cuda-12.2-cudnn-8.9.6/reqts-bvbrc-service.def
+```
+
+Note: This installs predict-structure from GitHub **main** branch. To pick up
+fixes from the `acceptance-testing` branch, modify `reqts-predict-structure.def`
+and `reqts-bvbrc-service.def` to use:
+
+```
+pip install "predict-structure[cwl] @ git+https://github.com/CEPI-dxkb/PredictStructureApp.git@acceptance-testing"
+```
+
+Or install from a local path during build by bind-mounting the repo.
+
+### Known Build Issue: /etc/subuid
+
+Without a `/etc/subuid` entry for the build user, apptainer falls back to
+"root-mapped namespace" and cannot handle files owned by non-root UIDs in
+the base SIF, producing errors like:
+
+```
+INFO:    User not listed in /etc/subuid, trying root-mapped namespace
+set_attributes: failed to change uid and gids on ...because Invalid argument
+ERROR:   unpackSIF failed: root filesystem extraction failed
+FATAL:   While performing build: packer failed to pack
+```
+
+Workarounds:
+- Have sysadmin add user to `/etc/subuid` and `/etc/subgid`
+- Use `--fakeroot` explicitly (does not fully resolve, but helps in some cases)
+- Use a writable overlay: `apptainer overlay create --size 50000 overlay.img`
+  then `apptainer exec --overlay overlay.img base.sif <install commands>`
