@@ -159,13 +159,15 @@ class TestChaiAdapter:
 
 
 class TestAlphaFoldAdapter:
-    def test_build_command_requires_data_dir(self, protein_entity_list, tmp_output):
+    def test_build_command_falls_back_to_config(self, protein_entity_list, tmp_output):
+        """Without --af2-data-dir, adapter falls back to tools.yml data_dir."""
         from predict_structure.adapters.alphafold import AlphaFoldAdapter
 
         adapter = AlphaFoldAdapter()
         prepared = adapter.prepare_input(protein_entity_list, tmp_output)
-        with pytest.raises(ValueError, match="af2-data-dir"):
-            adapter.build_command(prepared, tmp_output / "raw")
+        # Should not raise -- falls back to get_data_dir("alphafold")
+        cmd = adapter.build_command(prepared, tmp_output / "raw")
+        assert "--data_dir" in cmd
 
     def test_build_command_with_data_dir(self, protein_entity_list, tmp_output, tmp_path):
         from predict_structure.adapters.alphafold import AlphaFoldAdapter

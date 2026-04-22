@@ -814,7 +814,7 @@ def chai(protein, dna, rna, ligand, smiles, glycan,
 @main.command()
 @shared_options
 @optgroup.group("AlphaFold 2 options")
-@optgroup.option("--af2-data-dir", type=click.Path(), required=True, help="AlphaFold database directory (~2TB)")
+@optgroup.option("--af2-data-dir", type=click.Path(), default=None, help="AlphaFold database directory [default: from tools.yml]")
 @optgroup.option("--af2-model-preset", default="monomer", help="Model preset (monomer, monomer_casp14, multimer)")
 @optgroup.option("--af2-db-preset", default="reduced_dbs", help="DB preset (reduced_dbs, full_dbs)")
 @optgroup.option("--af2-max-template-date", default="2022-01-01", help="Max template date (YYYY-MM-DD)")
@@ -876,8 +876,8 @@ def esmfold(protein, dna, rna, ligand, smiles, glycan,
 @optgroup.group("OpenFold 3 options")
 @optgroup.option("--num-diffusion-samples", type=int, default=5, help="Diffusion samples per query [default: 5]")
 @optgroup.option("--num-model-seeds", type=int, default=1, help="Independent model seeds [default: 1]")
-@optgroup.option("--use-msa-server/--no-msa-server", default=True, help="Use ColabFold MSA server [default: True]")
-@optgroup.option("--use-templates/--no-templates", default=True, help="Use template structures [default: True]")
+@optgroup.option("--use-msa-server/--no-msa-server", default=False, help="Use ColabFold MSA server [default: False]")
+@optgroup.option("--use-templates/--no-templates", default=False, help="Use template structures [default: False]")
 @optgroup.option("--checkpoint", default=None, help="Model checkpoint name (e.g. openfold3_p2_v1)")
 @optgroup.option("--runner-yaml", type=click.Path(exists=True), default=None,
                  help="Runner YAML for advanced config (e.g. disable DeepSpeed for H200)")
