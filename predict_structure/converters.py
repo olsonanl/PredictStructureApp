@@ -393,8 +393,18 @@ def entities_to_openfold_json(
         ValueError: If a GLYCAN entity is present (unsupported by OpenFold 3).
     """
     import json
+    import shutil
 
     from predict_structure.entities import EntityType
+
+    # OpenFold 3 silently ignores MSA files whose basename isn't in its
+    # recognized aln_order (e.g. uniref90_hits, colabfold_main). When an
+    # MSA file is provided, we stage it with a recognized name in a
+    # per-chain directory alongside the query JSON.
+    msa_staging_dir: Path | None = None
+    if msa_path is not None:
+        msa_staging_dir = output_path.parent / "msa_staging"
+        msa_staging_dir.mkdir(parents=True, exist_ok=True)
 
     chains = []
     for entity in entity_list:
@@ -411,8 +421,16 @@ def entities_to_openfold_json(
         if entity.entity_type == EntityType.PROTEIN:
             chain["molecule_type"] = "protein"
             chain["sequence"] = entity.value
-            if msa_path is not None:
-                chain["main_msa_file_paths"] = [str(msa_path.resolve())]
+            if msa_path is not None and msa_staging_dir is not None:
+                # Stage the MSA file with a recognized name (colabfold_main.a3m)
+                # in a per-chain directory so OpenFold 3's aln_order accepts it.
+                chain_msa_dir = msa_staging_dir / f"chain_{entity.chain_id}"
+                chain_msa_dir.mkdir(exist_ok=True)
+                ext = msa_path.suffix.lower() if msa_path.suffix else ".a3m"
+                staged = chain_msa_dir / f"colabfold_main{ext}"
+                if not staged.exists():
+                    shutil.copy2(str(msa_path.resolve()), str(staged))
+                chain["main_msa_file_paths"] = [str(staged.resolve())]
         elif entity.entity_type == EntityType.DNA:
             chain["molecule_type"] = "dna"
             chain["sequence"] = entity.value

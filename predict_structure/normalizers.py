@@ -414,18 +414,13 @@ def normalize_openfold_output(raw_dir: Path, output_dir: Path) -> Path:
         if ptm is not None:
             ptm = float(ptm)
 
-    # Per-residue pLDDT from detailed confidences JSON
-    if conf_path.exists():
-        conf_data = json.loads(conf_path.read_text())
-        plddt_raw = conf_data.get("plddt")
-        if plddt_raw is not None:
-            per_residue = [float(v) for v in plddt_raw]
-
-    # Fallback: extract per-residue pLDDT from PDB B-factors
-    if not per_residue:
-        per_residue = _extract_ca_bfactors(output_dir / "model_1.pdb")
-        if per_residue:
-            plddt_mean = sum(per_residue) / len(per_residue)
+    # Per-residue pLDDT from PDB CA B-factors.
+    # NOTE: OpenFold 3's confidences.json contains per-ATOM pLDDT (AF3-style,
+    # by design -- one value per atom, not per residue). We use CA B-factors
+    # from the PDB output, which gives one value per residue.
+    per_residue = _extract_ca_bfactors(output_dir / "model_1.pdb")
+    if per_residue and not plddt_mean:
+        plddt_mean = sum(per_residue) / len(per_residue)
 
     write_confidence_json(output_dir, plddt_mean, ptm, per_residue)
     _copy_raw(raw_dir, output_dir)
