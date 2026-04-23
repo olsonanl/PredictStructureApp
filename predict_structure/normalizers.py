@@ -32,6 +32,7 @@ def write_confidence_json(
     plddt_mean: float,
     ptm: float | None,
     per_residue_plddt: list[float],
+    per_atom_plddt: list[float] | None = None,
 ) -> Path:
     """Write standardized confidence metrics.
 
@@ -40,6 +41,11 @@ def write_confidence_json(
         plddt_mean: Average per-residue confidence (0-100 scale).
         ptm: Predicted TM-score (None if unavailable).
         per_residue_plddt: Per-residue pLDDT array (0-100 scale).
+        per_atom_plddt: Optional per-atom pLDDT array, ordered to match
+            ATOM records in model_1.pdb. Length >= per_residue_plddt length.
+            For AF3-style tools (Boltz, Chai, OpenFold) this has true per-atom
+            values; for AF2/ESMFold the residue value is replicated across
+            each residue's atoms.
 
     Returns:
         Path to confidence.json.
@@ -50,6 +56,8 @@ def write_confidence_json(
         "ptm": round(ptm, 4) if ptm is not None else None,
         "per_residue_plddt": [round(v, 2) for v in per_residue_plddt],
     }
+    if per_atom_plddt:
+        data["per_atom_plddt"] = [round(v, 2) for v in per_atom_plddt]
     path.write_text(json.dumps(data, indent=2))
     return path
 
@@ -85,18 +93,43 @@ def write_metadata_json(
     return path
 
 
-def _extract_ca_bfactors(pdb_path: Path) -> list[float]:
-    """Extract B-factors from CA atoms in a PDB file."""
+def _extract_bfactors(pdb_path: Path) -> tuple[list[float], list[float]]:
+    """Extract CA and all-atom B-factors from a PDB file in one pass.
+
+    Hetatms (ligands, waters) are excluded from the all-atom list so the
+    result aligns with ATOM records in model_1.pdb. Only the first model
+    is read.
+
+    Returns:
+        (ca_bfactors, all_atom_bfactors)
+    """
     parser = PDBParser(QUIET=True)
     structure = parser.get_structure("s", str(pdb_path))
-    bfactors = []
+    ca: list[float] = []
+    all_atom: list[float] = []
     for model in structure:
         for chain in model:
             for residue in chain:
+                # Biopython residue.id is (hetflag, resseq, icode);
+                # " " means a standard residue, anything else is a hetatm.
+                if residue.id[0] != " ":
+                    continue
+                for atom in residue:
+                    all_atom.append(atom.get_bfactor())
                 if "CA" in residue:
-                    bfactors.append(residue["CA"].get_bfactor())
+                    ca.append(residue["CA"].get_bfactor())
         break  # first model only
-    return bfactors
+    return ca, all_atom
+
+
+def _extract_ca_bfactors(pdb_path: Path) -> list[float]:
+    """Return per-residue pLDDT via CA B-factors (thin wrapper for back-compat)."""
+    return _extract_bfactors(pdb_path)[0]
+
+
+def _extract_all_atom_bfactors(pdb_path: Path) -> list[float]:
+    """Return per-atom pLDDT via all-atom B-factors (thin wrapper for back-compat)."""
+    return _extract_bfactors(pdb_path)[1]
 
 
 def _copy_raw(raw_dir: Path, output_dir: Path) -> None:
@@ -188,7 +221,9 @@ def normalize_boltz_output(raw_dir: Path, output_dir: Path) -> Path:
                 plddt_mean = cplddt * 100 if cplddt <= 1.0 else cplddt
 
     if plddt_array or ptm is not None:
-        write_confidence_json(output_dir, plddt_mean, ptm, plddt_array)
+        _, per_atom = _extract_bfactors(output_dir / "model_1.pdb")
+        write_confidence_json(output_dir, plddt_mean, ptm, plddt_array,
+                              per_atom_plddt=per_atom)
     else:
         logger.warning("No confidence data found in %s", pred_subdir)
 
@@ -224,12 +259,12 @@ def normalize_chai_output(raw_dir: Path, output_dir: Path) -> Path:
         data = np.load(str(score_files[0]))
         ptm = float(data["ptm"].item()) if "ptm" in data else None
 
-    # Per-residue pLDDT from PDB B-factors (Chai stores 0-100 scale)
-    per_residue = _extract_ca_bfactors(pdb_dst)
-    # Chai B-factors are already 0-100
+    # Per-residue (CA) and per-atom pLDDT from PDB B-factors (Chai stores 0-100)
+    per_residue, per_atom = _extract_bfactors(pdb_dst)
     plddt_mean = sum(per_residue) / len(per_residue) if per_residue else 0.0
 
-    write_confidence_json(output_dir, plddt_mean, ptm, per_residue)
+    write_confidence_json(output_dir, plddt_mean, ptm, per_residue,
+                          per_atom_plddt=per_atom)
 
     _copy_raw(raw_dir, output_dir)
     return output_dir
@@ -292,24 +327,22 @@ def normalize_alphafold_output(raw_dir: Path, output_dir: Path) -> Path:
     # Convert PDB → CIF
     pdb_to_mmcif(pdb_dst, output_dir / "model_1.cif")
 
-    # Extract confidence
-    # Per-residue pLDDT from CA B-factors (AF2 stores pLDDT in B-factor, 0-100)
-    per_residue = _extract_ca_bfactors(pdb_dst)
+    # AF2 stores per-residue pLDDT (0-100) in B-factors, duplicated across atoms.
+    per_residue, per_atom = _extract_bfactors(pdb_dst)
     plddt_mean = sum(per_residue) / len(per_residue) if per_residue else 0.0
 
-    # Try ranking_debug.json for mean pLDDT (more accurate)
+    # Prefer ranking_debug.json's mean pLDDT over the simple average (it uses
+    # the model-selection score, which may differ from raw CA B-factor mean).
     ptm = None
     if ranking_json and ranking_json.exists():
         rdata = json.loads(ranking_json.read_text())
         plddts = rdata.get("plddts", {})
-        if plddts:
-            # Use the mean from ranking_debug if available
-            order = rdata.get("order", [])
-            if order:
-                top_model = order[0]
-                plddt_mean = plddts.get(top_model, plddt_mean)
+        order = rdata.get("order", [])
+        if plddts and order:
+            plddt_mean = plddts.get(order[0], plddt_mean)
 
-    write_confidence_json(output_dir, plddt_mean, ptm, per_residue)
+    write_confidence_json(output_dir, plddt_mean, ptm, per_residue,
+                          per_atom_plddt=per_atom)
     _copy_raw(raw_dir, output_dir)
     return output_dir
 
@@ -335,16 +368,17 @@ def normalize_esmfold_output(raw_dir: Path, output_dir: Path) -> Path:
     # Convert PDB → CIF
     pdb_to_mmcif(pdb_dst, output_dir / "model_1.cif")
 
-    # Extract confidence — ESMFold B-factors are 0-1, scale to 0-100
-    raw_bfactors = _extract_ca_bfactors(pdb_dst)
-    if raw_bfactors and max(raw_bfactors) <= 1.0:
-        per_residue = [b * 100 for b in raw_bfactors]
-    else:
-        per_residue = raw_bfactors
+    # ESMFold writes pLDDT as PDB B-factors, sometimes on 0-1 and sometimes
+    # on 0-100 scale depending on version. Detect from CA values and scale.
+    per_residue, per_atom = _extract_bfactors(pdb_dst)
+    if per_residue and max(per_residue) <= 1.0:
+        per_residue = [b * 100 for b in per_residue]
+        per_atom = [b * 100 for b in per_atom]
     plddt_mean = sum(per_residue) / len(per_residue) if per_residue else 0.0
 
     # pTM not available in PDB output (logged to stdout by hf_fold.py)
-    write_confidence_json(output_dir, plddt_mean, None, per_residue)
+    write_confidence_json(output_dir, plddt_mean, None, per_residue,
+                          per_atom_plddt=per_atom)
     _copy_raw(raw_dir, output_dir)
     return output_dir
 
@@ -414,19 +448,14 @@ def normalize_openfold_output(raw_dir: Path, output_dir: Path) -> Path:
         if ptm is not None:
             ptm = float(ptm)
 
-    # Per-residue pLDDT from detailed confidences JSON
-    if conf_path.exists():
-        conf_data = json.loads(conf_path.read_text())
-        plddt_raw = conf_data.get("plddt")
-        if plddt_raw is not None:
-            per_residue = [float(v) for v in plddt_raw]
+    # OpenFold 3's confidences.json has per-ATOM pLDDT by design (AF3 atomization
+    # convention -- see docs/OUTPUT_NORMALIZATION.md). Use CA B-factors for the
+    # per-residue convention consumers expect.
+    per_residue, per_atom = _extract_bfactors(output_dir / "model_1.pdb")
+    if per_residue and not plddt_mean:
+        plddt_mean = sum(per_residue) / len(per_residue)
 
-    # Fallback: extract per-residue pLDDT from PDB B-factors
-    if not per_residue:
-        per_residue = _extract_ca_bfactors(output_dir / "model_1.pdb")
-        if per_residue:
-            plddt_mean = sum(per_residue) / len(per_residue)
-
-    write_confidence_json(output_dir, plddt_mean, ptm, per_residue)
+    write_confidence_json(output_dir, plddt_mean, ptm, per_residue,
+                          per_atom_plddt=per_atom)
     _copy_raw(raw_dir, output_dir)
     return output_dir

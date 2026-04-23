@@ -134,12 +134,16 @@ class TestAlphaFoldSubcommand:
         assert "--fp16" not in result.output
         assert "--use-potentials" not in result.output
 
-    def test_requires_af2_data_dir(self, sample_fasta, tmp_path):
+    def test_af2_data_dir_falls_back_to_config(self, sample_fasta, tmp_path):
+        """Without --af2-data-dir, the adapter falls back to tools.yml config."""
         runner = CliRunner()
         result = runner.invoke(main, [
             "alphafold", "--protein", str(sample_fasta), "-o", str(tmp_path / "out"), "--debug",
         ])
-        assert result.exit_code != 0  # --af2-data-dir is required
+        # --debug only builds the command; should succeed and include --data_dir
+        # resolved from get_data_dir("alphafold")
+        assert result.exit_code == 0
+        assert "--data_dir" in result.output
 
     def test_debug_prints_command(self, sample_fasta, tmp_path):
         runner = CliRunner()
