@@ -6,7 +6,7 @@
     "num_recycles": 3,
     "sampling_steps": 200,
     "output_format": "pdb",
-    "msa_mode": "server",
+    "msa_mode": "none",
     "use_potentials": false,
     "seed": 42
 }
