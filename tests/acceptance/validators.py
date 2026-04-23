@@ -138,7 +138,6 @@ def validate_output_directory(
             elif len(residues) > 0:
                 result.passed("confidence_residue_count", f"{len(residues)} residues")
 
-            # Optional per_atom_plddt field (added in 2026-04-23)
             atoms = conf_data.get("per_atom_plddt")
             if atoms is not None:
                 if len(atoms) < len(residues):
