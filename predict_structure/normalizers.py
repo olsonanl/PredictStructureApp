@@ -158,6 +158,32 @@ def _copy_raw(raw_dir: Path, output_dir: Path) -> None:
     shutil.copytree(str(raw_dir), str(dest))
 
 
+def move_reports_to_subdir(output_dir: Path) -> Path | None:
+    """Relocate protein_compare report files into output_dir/report/.
+
+    `protein_compare characterize -o <prefix>` writes `<prefix>.html`,
+    `<prefix>.json`, `<prefix>.pdf` at the top level. For a unified layout
+    we move any `report.{html,json,pdf}` into a `report/` subdir so the
+    top level stays uniformly machine-readable and `report.json` doesn't
+    collide with `results.json`.
+
+    No-op if no report files are present. Safe to call multiple times.
+
+    Returns:
+        Path to the `report/` directory if any reports were moved, else None.
+    """
+    report_names = ("report.html", "report.json", "report.pdf")
+    moved = False
+    dest = output_dir / "report"
+    for name in report_names:
+        src = output_dir / name
+        if src.is_file():
+            dest.mkdir(exist_ok=True)
+            shutil.move(str(src), str(dest / name))
+            moved = True
+    return dest if moved else None
+
+
 def normalize_boltz_output(raw_dir: Path, output_dir: Path) -> Path:
     """Normalize Boltz-2 output to standardized layout.
 

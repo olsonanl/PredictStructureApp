@@ -134,6 +134,55 @@ CUDA_VISIBLE_DEVICES=0 PREDICT_STRUCTURE_SIF=/scout/containers/folding_prod.sif 
 If a Phase 3 test passes only with the overlay, the fix still needs to land
 in the container image before the build is release-ready.
 
+**Workspace layout.** Tests write under
+`<user-home>/AppTests/<tool>/<testname>-<YYYYMMDD-HHMMSS>/` -- the timestamped
+leaf is the "versioned output_path" the service script uploads into. Tests
+clean up their own sub-folder on completion.
+
+```
+<user-home>/AppTests/
+├── _inputs/                              ← staging for test input FASTAs
+│   └── <testname>-<ts>-simple_protein.fasta
+├── misc/    upload_and_verify-<ts>/      ← raw upload test scratch
+├── esmfold/ workspace_roundtrip-<ts>/    ← service-script output
+│   └── model_1.pdb, model_1.cif, confidence.json, metadata.json, ...
+└── chai/    report_workspace_roundtrip-<ts>/
+    └── model_1.pdb, model_1.cif, confidence.json, metadata.json,
+        report.html, report.json, report.pdf, raw/, raw_output/
+```
+
+Test inputs are staged in `_inputs/` (sibling folder) rather than inside the
+output dir. This keeps the output dir fresh so `p3-cp -r` lands files at the
+top level instead of nesting under `output/` (p3-cp's behavior when the
+target already exists).
+
+**Two file layouts in Phase 3:**
+
+| File | Scope |
+|------|-------|
+| `test_phase3_workspace.py` | Pure workspace ops (`p3-whoami`, `p3-ls`, `p3-cp`) |
+| `test_phase3_appscript_workspace.py` | Service script + workspace end-to-end roundtrips |
+| `test_phase3_service_script.py` | Service script offline (no workspace I/O) |
+
+**Phase-3 env var toggles:**
+
+| Env var | Effect |
+|---------|--------|
+| `PREDICT_STRUCTURE_DEV_SERVICE=1` | Overlay host's `service-scripts/` + `app_specs/` into the SIF (see table above) |
+| `PREDICT_STRUCTURE_KEEP_WORKSPACE=1` | Skip post-test `p3-rm`; each test prints the kept path |
+| `P3_DEBUG_RUN_SUBFOLDER=1` | (service script) Nest results under a per-run subfolder `predict_structure_result_<ts>_<task_id>/`. Default is flat -- results land directly in `output_path`. Useful when multiple runs share one `output_path`. |
+
+Example -- investigate artifacts after a failing Chai run:
+
+```bash
+PREDICT_STRUCTURE_DEV_SERVICE=1 PREDICT_STRUCTURE_KEEP_WORKSPACE=1 \
+CUDA_VISIBLE_DEVICES=0 PREDICT_STRUCTURE_SIF=/scout/containers/folding_prod.sif \
+  conda run -n predict-structure python -m pytest \
+  tests/acceptance/test_phase3_appscript_workspace.py -v -s
+# Then:
+# p3-ls -l /<user>@bvbrc/home/AppTests/chai/report_workspace_roundtrip-<ts>/
+```
+
 ### Full Suite on Both Containers in Parallel
 
 Each container on separate GPUs (requires enough GPUs):

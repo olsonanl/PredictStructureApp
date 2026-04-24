@@ -282,6 +282,53 @@ class TestNormalizeOpenFoldOutput:
             normalize_openfold_output(raw, tmp_output)
 
 
+class TestMoveReportsToSubdir:
+    def test_moves_existing_reports(self, tmp_path):
+        """report.html/.json/.pdf at top level are moved into report/."""
+        from predict_structure.normalizers import move_reports_to_subdir
+
+        out = tmp_path / "out"
+        out.mkdir()
+        (out / "report.html").write_text("<html></html>")
+        (out / "report.json").write_text("{}")
+        (out / "report.pdf").write_bytes(b"%PDF-1.4\n")
+        (out / "model_1.pdb").write_text("ATOM")
+
+        dest = move_reports_to_subdir(out)
+        assert dest == out / "report"
+        assert (out / "report" / "report.html").exists()
+        assert (out / "report" / "report.json").exists()
+        assert (out / "report" / "report.pdf").exists()
+        # Top level no longer has them
+        assert not (out / "report.html").exists()
+        assert not (out / "report.json").exists()
+        # Non-report files untouched
+        assert (out / "model_1.pdb").exists()
+
+    def test_no_reports_is_noop(self, tmp_path):
+        from predict_structure.normalizers import move_reports_to_subdir
+
+        out = tmp_path / "out"
+        out.mkdir()
+        (out / "model_1.pdb").write_text("ATOM")
+
+        dest = move_reports_to_subdir(out)
+        assert dest is None
+        assert not (out / "report").exists()
+
+    def test_partial_reports(self, tmp_path):
+        """Only html present -- moves it, still creates report/ dir."""
+        from predict_structure.normalizers import move_reports_to_subdir
+
+        out = tmp_path / "out"
+        out.mkdir()
+        (out / "report.html").write_text("<html></html>")
+
+        dest = move_reports_to_subdir(out)
+        assert dest == out / "report"
+        assert (out / "report" / "report.html").exists()
+
+
 class TestNormalizeAlphaFoldOutput:
     def test_normalize(self, tmp_path, tmp_output):
         from predict_structure.normalizers import normalize_alphafold_output
