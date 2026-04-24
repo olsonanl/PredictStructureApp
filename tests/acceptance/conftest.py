@@ -117,7 +117,11 @@ class ApptainerRunner:
         proc = subprocess.run(
             cmd,
             capture_output=True,
-            text=True,
+            # Workspace listings (p3-ls) can contain non-UTF-8 bytes from
+            # user-provided filenames. Replace undecodable bytes instead
+            # of raising UnicodeDecodeError.
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
         elapsed = time.monotonic() - start

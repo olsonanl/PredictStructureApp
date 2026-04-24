@@ -17,6 +17,23 @@ pytestmark = [pytest.mark.phase3, pytest.mark.workspace, pytest.mark.container]
 TEST_DATA_HOST = Path(__file__).parent.parent.parent / "test_data"
 
 
+def _parse_ws_user(token_text: str) -> str:
+    """Extract the workspace user (e.g. 'awilke@bvbrc') from a .patric_token.
+
+    Token format: 'un=<user>@<domain>|tokenid=...'
+    Returns: '<user>@<domain>' (e.g. 'awilke@bvbrc').
+    """
+    for part in token_text.split("|"):
+        if part.startswith("un="):
+            return part[3:]
+    raise ValueError("Could not find 'un=' field in token")
+
+
+def _ws_home(token_text: str) -> str:
+    """Return the workspace home path for the token's user."""
+    return f"/{_parse_ws_user(token_text)}/home"
+
+
 class TestWorkspaceConnectivity:
     """Verify workspace access is available."""
 
@@ -33,17 +50,18 @@ class TestWorkspaceConnectivity:
         )
         assert result.stdout.strip(), "p3-whoami returned empty output"
 
-    def test_p3_ls_workspace(self, container, workspace_token):
-        """p3-ls should be able to list the home workspace."""
+    def test_p3_ls_home(self, container, workspace_token):
+        """p3-ls should be able to list the user's workspace home directory."""
         token = workspace_token.read_text().strip()
+        home = _ws_home(token)
         result = container.exec(
-            ["p3-ls", "/"],
+            ["p3-ls", home],
             gpu=False,
             env={"KB_AUTH_TOKEN": token},
             timeout=30,
         )
         assert result.returncode == 0, (
-            f"p3-ls failed: {result.stderr}"
+            f"p3-ls {home} failed: {result.stderr}"
         )
 
 
@@ -58,15 +76,9 @@ class TestWorkspaceUpload:
         test_file = tmp_path / "test_upload.txt"
         test_file.write_text("acceptance test upload")
 
-        # Get workspace home path
-        whoami = container.exec(
-            ["p3-whoami"],
-            gpu=False,
-            env={"KB_AUTH_TOKEN": token},
-            timeout=30,
-        )
-        user = whoami.stdout.strip()
-        ws_path = f"/{user}@patricbrc.org/home/acceptance_test"
+        # Derive workspace path from the token itself (p3-whoami returns a
+        # human-readable string, not a workspace path).
+        ws_path = f"{_ws_home(token)}/acceptance_test"
 
         binds = {str(tmp_path): "/upload"}
 
@@ -118,16 +130,7 @@ class TestServiceScriptWithWorkspace:
     ):
         """Run ESMFold via service script and verify workspace upload."""
         token = workspace_token.read_text().strip()
-
-        # Get user for workspace path
-        whoami = container.exec(
-            ["p3-whoami"],
-            gpu=False,
-            env={"KB_AUTH_TOKEN": token},
-            timeout=30,
-        )
-        user = whoami.stdout.strip()
-        ws_output = f"/{user}@patricbrc.org/home/acceptance_test_output"
+        ws_output = f"{_ws_home(token)}/acceptance_test_output"
 
         params = {
             "tool": "esmfold",
