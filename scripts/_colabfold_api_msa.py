@@ -114,7 +114,12 @@ def download(ticket: str, out_path: Path) -> None:
         if f is None:
             raise RuntimeError(f"failed to extract {chosen.name}")
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(f.read())
+        # ColabFold tarballs sometimes pad with a trailing NUL byte that
+        # downstream tools (e.g. boltz a3m parser) reject as
+        # KeyError: '\x00'. Strip trailing whitespace/nulls and ensure
+        # the file ends with a single newline.
+        body = f.read().rstrip(b"\x00 \t\r\n")
+        out_path.write_bytes(body + b"\n")
         print(f"  -> wrote {out_path} ({out_path.stat().st_size} bytes)")
 
 
