@@ -77,10 +77,22 @@ class TestServiceScriptExecution:
             binds=binds,
             timeout=timeout,
         )
+        # The BV-BRC AppScript framework returns exit 0 even when the
+        # Perl `die`s -- it catches the exception and writes JobFailed
+        # internally. So we ALSO assert the prediction produced its
+        # canonical output (matches docs/OUTPUT_NORMALIZATION.md §1).
         assert result.returncode == 0, (
-            f"Service script {params_filename} failed (rc={result.returncode}).\n"
-            f"STDOUT:\n{result.stdout[-2000:]}\n"
-            f"STDERR:\n{result.stderr[-2000:]}"
+            f"Service script {params_filename} returned non-zero "
+            f"(rc={result.returncode}).\nSTDERR:\n{result.stderr[-2000:]}"
+        )
+        local_output = output_dir / "output"
+        produced = list(local_output.iterdir()) if local_output.is_dir() else []
+        assert (local_output / "model_1.pdb").is_file(), (
+            f"{params_filename}: prediction did not produce model_1.pdb -- "
+            "framework likely caught a die() and reported success.\n"
+            f"Local output dir: {local_output}\n"
+            f"Files produced: {[p.name for p in produced]}\n"
+            f"STDERR tail:\n{result.stderr[-2000:]}"
         )
 
     def test_esmfold_input_file(self, container, tmp_path):
@@ -118,9 +130,22 @@ class TestServiceScriptTiers:
             binds=binds,
             timeout=timeout,
         )
+        # The BV-BRC AppScript framework returns exit 0 even when the
+        # Perl `die`s -- it catches the exception and writes JobFailed
+        # internally. So we ALSO assert the prediction produced its
+        # canonical output (matches docs/OUTPUT_NORMALIZATION.md §1).
         assert result.returncode == 0, (
-            f"{params_file}: service script failed (rc={result.returncode}).\n"
-            f"STDERR:\n{result.stderr[-2000:]}"
+            f"{params_file}: service script returned non-zero "
+            f"(rc={result.returncode}).\nSTDERR:\n{result.stderr[-2000:]}"
+        )
+        local_output = output_dir / "output"
+        produced = list(local_output.iterdir()) if local_output.is_dir() else []
+        assert (local_output / "model_1.pdb").is_file(), (
+            f"{params_file}: prediction did not produce model_1.pdb -- "
+            "framework likely caught a die() and reported success.\n"
+            f"Local output dir: {local_output}\n"
+            f"Files produced: {[p.name for p in produced]}\n"
+            f"STDERR tail:\n{result.stderr[-2000:]}"
         )
 
     @pytest.mark.tier1
