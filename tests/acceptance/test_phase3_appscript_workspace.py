@@ -97,6 +97,18 @@ class TestServiceScriptWithWorkspace:
                 f"results.json not uploaded under {ws_output}:\n{ls_result.stdout}"
             )
 
+            # Regression guard: $script->donot_create_result_folder(1) in
+            # the Perl service script prevents the BV-BRC AppScript framework
+            # from auto-creating <output_path> before our upload. If the
+            # framework starts auto-creating again, p3-cp -r would nest the
+            # tree under output/ instead of at the top level. Detect that.
+            assert "output" not in files, (
+                f"Detected nested 'output/' subdir under {ws_output} -- "
+                "AppScript framework may have started auto-creating the "
+                "result folder again. Re-check donot_create_result_folder.\n"
+                f"Files: {files}"
+            )
+
         finally:
             cleanup_ws(container, token, ws_output)
             cleanup_ws(container, token, ws_input)
