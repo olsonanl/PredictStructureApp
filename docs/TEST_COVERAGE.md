@@ -31,6 +31,16 @@ Most of the gaps + the T1–T5 tier ladder have been implemented on the
 | MSA-server mode (gap #11) | out of scope per user lock |
 | Phase 1 native T2/T5 tier tests | deferred -- Phase 2/3 tier coverage is the higher-leverage layer |
 
+### Validation status (as of `tiered-fixture-ladder` HEAD)
+
+- `tier1 and not slow` -- 17 pass / 4 graceful skip (rocrate / cwltool gating) in ~8 min
+- `tier2` (full, all 9 cases) -- 9 pass in 5m12s; surfaced + fixed two real bugs:
+  - service-script tests passed silently when the BV-BRC framework caught a Perl `die` (returned exit 0). Tests now also assert `model_1.pdb` exists post-run.
+  - `download_workspace_file` always tried the workspace API first, failing on container-local fixture paths. Now tries local file first.
+  - ColabFold-API MSA extraction left a trailing NUL byte that broke Boltz's a3m parser. `_colabfold_api_msa.py` now strips it.
+
+T3 / T4 / T5 not yet validated end-to-end -- track in the PR test plan.
+
 ## Inventory
 
 - **358 unit tests** (no GPU, no container) — adapters, converters,

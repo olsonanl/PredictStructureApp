@@ -178,6 +178,15 @@ pytest tests/acceptance/ -m tier4 --sif ... --timeout 3600
 pytest tests/acceptance/ -m tier5 --sif ... --timeout 7200
 ```
 
+Observed wall-clock on `folding_prod.sif` (H200 NVL, single GPU):
+
+| Tier slice | Tests | Wall-clock |
+|---|---|---|
+| `tier1 and not slow` | 21 (17 pass, 4 graceful skip) | ~8 min |
+| `tier2` (full) | 9 (all pass) | ~5 min |
+
+The `tier2` aggregate is dominated by the 4 service-script + tool runs at 214 aa with deep MSA: ESMFold ~46s, Boltz ~1m12s, Chai ~1m12s, OpenFold ~1m53s. Use these as ballpark expectations when scheduling CI.
+
 Combine with phase markers to scope further:
 
 ```bash
