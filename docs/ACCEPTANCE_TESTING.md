@@ -134,6 +134,29 @@ CUDA_VISIBLE_DEVICES=0 PREDICT_STRUCTURE_SIF=/scout/containers/folding_prod.sif 
 If a Phase 3 test passes only with the overlay, the fix still needs to land
 in the container image before the build is release-ready.
 
+### Test runtime extraction
+
+The acceptance suite records every test's call-phase duration in
+`output/test_runtimes.json` (default; pass `--runtime-out PATH` or set
+`PREDICT_STRUCTURE_RUNTIME_OUT` to override; pass an empty string to
+disable). The JSON has per-test entries plus per-tier aggregates
+(count, total, mean, p50, p95, max).
+
+```bash
+# Run a tier and capture runtimes
+pytest tests/acceptance/ -m tier1 --sif ... --runtime-out output/tier1.json
+
+# Print a markdown summary (per-tier aggregates + top-N slowest)
+python scripts/runtime_summary.py --in output/tier1.json --top 10
+
+# Built-in pytest "top-N" alternative
+pytest tests/acceptance/ -m tier1 --sif ... --durations=20
+
+# Full per-test JSON via pytest-json-report (already in dev extras)
+pytest tests/acceptance/ -m tier1 --sif ... \
+  --json-report --json-report-file=output/tier1.full.json
+```
+
 ### Tier ladder
 
 Run a specific tier across all phases:

@@ -216,10 +216,14 @@ class TestJobBatchMode:
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
+        # /local_databases is rw because tools cache HF weights into it.
+        # ApptainerRunner.predict() binds it automatically, but exec()
+        # doesn't -- mirror that behavior here.
         binds = {
             str(TEST_DATA_HOST): "/data",
             str(job_dir): "/jobs",
             str(output_dir): "/output",
+            "/local_databases": "/local_databases",
         }
         result = container.exec(
             ["predict-structure", "--job", "/jobs/batch.yaml",
