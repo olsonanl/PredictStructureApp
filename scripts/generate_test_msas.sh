@@ -24,27 +24,23 @@ TEST_DATA="$REPO/test_data"
 MSA_DIR="$TEST_DATA/msa"
 mkdir -p "$MSA_DIR"
 
+# Two paths supported:
+#  1. Local colabfold_search (via $COLABFOLD_SEARCH) -- preferred when
+#     a local MMseqs2 install is available.
+#  2. Direct REST calls to https://api.colabfold.com via the bundled
+#     Python helper at scripts/_colabfold_api_msa.py -- used as a
+#     fallback when colabfold_search isn't installed.
+
+COLABFOLD_SEARCH="${COLABFOLD_SEARCH:-}"
 SIF="${PREDICT_STRUCTURE_SIF:-/scout/containers/folding_prod.sif}"
-if [ ! -f "$SIF" ]; then
-    echo "ERROR: SIF not found: $SIF" >&2
-    echo "Set PREDICT_STRUCTURE_SIF=<path-to-sif> and re-run." >&2
-    exit 1
-fi
 
-# colabfold_search inside the SIF -- adjust if path differs.
-COLABFOLD_SEARCH="${COLABFOLD_SEARCH:-/opt/conda-colabfold/bin/colabfold_search}"
-
-run_one() {
+run_one_via_local() {
     local fasta="$1"
     local out_basename="$2"
     local tmp="$(mktemp -d)"
-    echo "=== Generating MSA for $fasta -> $out_basename.a3m ==="
-    apptainer exec --bind "$TEST_DATA":/data --bind "$tmp":/tmp_msa "$SIF" \
-        "$COLABFOLD_SEARCH" \
-        "/data/$(basename "$fasta")" \
-        /tmp_msa \
-        --use-env 1 --use-templates 0 --filter 1
-    # ColabFold writes 0.a3m (or <name>.a3m depending on version)
+    echo "=== Generating MSA for $fasta -> $out_basename.a3m (colabfold_search) ==="
+    "$COLABFOLD_SEARCH" "$fasta" "$tmp" --use-env 1 --use-templates 0 --filter 1
+    local a3m
     a3m=$(ls "$tmp"/*.a3m 2>/dev/null | head -1)
     if [ -z "$a3m" ]; then
         echo "ERROR: no .a3m produced in $tmp" >&2
@@ -54,6 +50,22 @@ run_one() {
     cp "$a3m" "$MSA_DIR/${out_basename}.a3m"
     rm -rf "$tmp"
     echo "  -> $MSA_DIR/${out_basename}.a3m ($(wc -l < "$MSA_DIR/${out_basename}.a3m") lines)"
+}
+
+run_one_via_api() {
+    local fasta="$1"
+    local out_basename="$2"
+    echo "=== Generating MSA for $fasta -> $out_basename.a3m (REST API) ==="
+    python "$REPO/scripts/_colabfold_api_msa.py" "$fasta" \
+        "$MSA_DIR/${out_basename}.a3m"
+}
+
+run_one() {
+    if [ -n "$COLABFOLD_SEARCH" ] && [ -x "$COLABFOLD_SEARCH" ]; then
+        run_one_via_local "$@"
+    else
+        run_one_via_api "$@"
+    fi
 }
 
 run_one "$TEST_DATA/medium_protein.fasta" medium_protein
