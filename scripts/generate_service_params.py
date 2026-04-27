@@ -143,6 +143,102 @@ def build_params() -> dict[str, dict]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Q/A expected-output specs (sibling of every input params file)
+#
+# See test_data/service_params/README.md for the format. External testing
+# frameworks read these alongside the params input.
+# ---------------------------------------------------------------------------
+
+
+# Expected residue counts per fixture (used in length predicates).
+TIER_RESIDUES = {
+    "tier1": 46,    # crambin
+    "tier2": 214,   # 1AKE adenylate kinase
+    "tier3": None,  # text_input -- no fixed length predicate
+    "tier4": None,  # multimer; chain lengths vary per tool
+    "tier5": 434,   # yeast enolase
+}
+
+
+def _expected_for(tier: str, tool: str, params_basename: str) -> dict:
+    """Build the .expected.json contract for a (tier, tool) case."""
+    common_files = [
+        "model_1.pdb",
+        "model_1.cif",
+        "confidence.json",
+        "metadata.json",
+        "results.json",
+        "raw",
+    ]
+    json_constraints: dict = {
+        "confidence.json": {
+            "plddt_mean": {"min": 0, "max": 100},
+            "per_residue_plddt[*]": {"min": 0, "max": 100},
+        },
+        "metadata.json": {
+            "tool": {"equals": tool},
+            "runtime_seconds": {"min": 0},
+            "version": {"matches": r"^\d+\.\d+\.\d+"},
+        },
+        "results.json": {
+            "schema_version": {"equals": "1.0"},
+            "status": {"equals": "success"},
+            "tool": {"equals": tool},
+            "outputs[*].sha256": {"oneOf": [
+                {"matches": "^[0-9a-f]{64}$"},
+                "null",
+            ]},
+        },
+    }
+    if TIER_RESIDUES[tier]:
+        json_constraints["confidence.json"]["per_residue_plddt"] = {
+            "length": TIER_RESIDUES[tier]
+        }
+
+    return {
+        "name": params_basename.replace(".json", ""),
+        "description": (
+            f"{tool} via App-PredictStructure.pl on the {tier} fixture "
+            "(see docs/TEST_COVERAGE.md tier ladder)."
+        ),
+        "input": {
+            "params_file": params_basename,
+            "needs_gpu": tool != "esmfold" or tier in ("tier2", "tier4", "tier5"),
+            "needs_workspace_token": False,
+        },
+        "expected": {
+            "exit_code": 0,
+            "timeout_s": 7200 if tier == "tier5" else 3600,
+            "output_dir": "/output/output",
+            "files_exist": common_files,
+            "schemas": {
+                "confidence.json": "schemas/confidence.schema.json",
+                "metadata.json": "schemas/metadata.schema.json",
+                "results.json": "schemas/results.schema.json",
+            },
+            "json_constraints": json_constraints,
+            "pdb_constraints": {
+                "model_1.pdb": {
+                    "min_atoms": 40,
+                    "min_size_bytes": 1000,
+                    "first_record_type": "ATOM",
+                },
+            },
+        },
+    }
+
+
+def build_expected() -> dict[str, dict]:
+    """Return {filename: expected_dict} for each tier x tool case."""
+    out: dict[str, dict] = {}
+    for tier, tools in TOOLS_PER_TIER.items():
+        for tool in tools:
+            params = f"{tier}_{tool}.json"
+            out[f"{tier}_{tool}.expected.json"] = _expected_for(tier, tool, params)
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
     parser.add_argument(
@@ -152,12 +248,17 @@ def main() -> int:
     args = parser.parse_args()
 
     PARAMS_DIR.mkdir(exist_ok=True)
-    expected = build_params()
-    drift = []
+    inputs = build_params()
+    expected_specs = build_expected()
+    drift: list[str] = []
 
-    for filename, params in expected.items():
+    all_files: dict[str, dict] = {}
+    all_files.update(inputs)
+    all_files.update(expected_specs)
+
+    for filename, payload in all_files.items():
         target = PARAMS_DIR / filename
-        text = json.dumps(params, indent=2) + "\n"
+        text = json.dumps(payload, indent=2) + "\n"
         if args.check:
             current = target.read_text() if target.is_file() else ""
             if current != text:
@@ -170,9 +271,9 @@ def main() -> int:
         if drift:
             print(f"DRIFT in {len(drift)} files: {drift}", file=sys.stderr)
             return 1
-        print("All service params files match generator output.")
+        print("All service params + expected files match generator output.")
     else:
-        print(f"Generated {len(expected)} files in {PARAMS_DIR}")
+        print(f"Generated {len(all_files)} files in {PARAMS_DIR}")
     return 0
 
 
