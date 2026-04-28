@@ -44,18 +44,34 @@ that breaks this. Each runner has a different way to fix it:
   `--image-dir /scout/containers` so GoWe resolves the relative
   `dockerPull: folding_prod.sif` correctly.
 
-Cache + bind environment template (works for both runners):
+Cache + bind + GPU environment template (works for both runners):
 
 ```bash
-export SINGULARITY_BINDPATH="/local_databases:/local_databases"
-export SINGULARITYENV_HF_HOME=/local_databases/cache
-export SINGULARITYENV_HF_DATASETS_CACHE=/local_databases/cache
-export SINGULARITYENV_TRANSFORMERS_CACHE=/local_databases/cache
-export SINGULARITYENV_TORCH_HOME=/local_databases/cache
-export SINGULARITYENV_XDG_CACHE_HOME=/local_databases/cache/tmp
-export SINGULARITYENV_TRITON_CACHE_DIR=/local_databases/cache/tmp
-export SINGULARITYENV_NUMBA_CACHE_DIR=/local_databases/cache/tmp
+# GPU passthrough -- without this both runners launch apptainer
+# without --nv, so the SIF can't see the host's NVIDIA driver and
+# every prediction silently falls back to CPU.
+export APPTAINER_NV=1
+
+# /local_databases bind (model weights + writable HF cache).
+# APPTAINER_BINDPATH is the modern name; SINGULARITY_BINDPATH still
+# works but apptainer >=1.x prints a deprecation INFO line.
+export APPTAINER_BINDPATH="/local_databases:/local_databases"
+
+# Cache redirection inside the SIF. APPTAINERENV_* survives
+# `--cleanenv`; the SINGULARITYENV_* prefix is the legacy alias.
+export APPTAINERENV_HF_HOME=/local_databases/cache
+export APPTAINERENV_HF_DATASETS_CACHE=/local_databases/cache
+export APPTAINERENV_TRANSFORMERS_CACHE=/local_databases/cache
+export APPTAINERENV_TORCH_HOME=/local_databases/cache
+export APPTAINERENV_XDG_CACHE_HOME=/local_databases/cache/tmp
+export APPTAINERENV_TRITON_CACHE_DIR=/local_databases/cache/tmp
+export APPTAINERENV_NUMBA_CACHE_DIR=/local_databases/cache/tmp
 ```
+
+> **Note:** cwltool's `--singularity` mode honors the
+> `cwltool:CUDARequirement` hint and passes `--nv` automatically; GoWe
+> ignores that hint and needs the explicit `APPTAINER_NV=1` env var.
+> Setting it on both runners is harmless and idempotent.
 
 ## Job file template
 
@@ -228,6 +244,14 @@ apptainer exec /scout/containers/folding_prod.sif \
 
 If missing, the SIF needs to be rebuilt from current `main` (see
 `docs/CONTAINER_BUILD.md`).
+
+### `WARNING: No GPU available, falling back to CPU` (or `--fp16 ignored`)
+
+Apptainer launched without `--nv`, so the SIF can't see the host
+NVIDIA driver. Set `APPTAINER_NV=1` before invoking the runner. This
+is automatically set by cwltool when the CWL declares
+`cwltool:CUDARequirement`, but GoWe doesn't honor that hint -- pass
+the env var explicitly.
 
 ### Workflow validates but predict-structure exits with no error message
 
