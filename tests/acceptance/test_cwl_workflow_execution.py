@@ -68,11 +68,16 @@ def _cwltool_env() -> dict[str, str]:
     """
     env = os.environ.copy()
     extra_binds = "/local_databases:/local_databases"
-    existing = env.get("SINGULARITY_BINDPATH", "")
-    env["SINGULARITY_BINDPATH"] = (
-        f"{existing},{extra_binds}" if existing else extra_binds
-    )
-    # Tell singularity to re-inject these env vars even with --cleanenv.
+    # APPTAINER_BINDPATH is the modern name; SINGULARITY_BINDPATH is the
+    # legacy alias. Set both to be safe across apptainer versions.
+    for var in ("APPTAINER_BINDPATH", "SINGULARITY_BINDPATH"):
+        existing = env.get(var, "")
+        env[var] = f"{existing},{extra_binds}" if existing else extra_binds
+    # Force GPU passthrough. cwltool honors `cwltool:CUDARequirement`
+    # and would set --nv automatically, but tests should be explicit so
+    # the same fixture works for runners (e.g. GoWe) that ignore the hint.
+    env["APPTAINER_NV"] = "1"
+    # Re-inject cache env vars even when the runner uses --cleanenv.
     cache_vars = {
         "HF_HOME": "/local_databases/cache",
         "HF_DATASETS_CACHE": "/local_databases/cache",
@@ -83,6 +88,7 @@ def _cwltool_env() -> dict[str, str]:
         "NUMBA_CACHE_DIR": "/local_databases/cache/tmp",
     }
     for k, v in cache_vars.items():
+        env[f"APPTAINERENV_{k}"] = v
         env[f"SINGULARITYENV_{k}"] = v
     return env
 
