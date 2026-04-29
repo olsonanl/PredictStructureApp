@@ -60,18 +60,23 @@ class AlphaFoldAdapter(BaseAdapter):
         **kwargs: Any,
     ) -> list[str]:
         """Construct the ``run_alphafold.py`` command with all database paths."""
+        from predict_structure.config import get_command, get_data_dir
+
         data_dir = kwargs.get("af2_data_dir")
         if not data_dir:
-            raise ValueError(
-                "AlphaFold requires --af2-data-dir pointing to the database directory (~2TB). "
-                "See https://github.com/deepmind/alphafold#databases for setup."
-            )
+            # Fall back to tools.yml data_dir (e.g. /local_databases/alphafold/databases)
+            try:
+                data_dir = str(get_data_dir("alphafold"))
+            except (FileNotFoundError, KeyError):
+                raise ValueError(
+                    "AlphaFold requires --af2-data-dir pointing to the database directory (~2TB). "
+                    "See https://github.com/deepmind/alphafold#databases for setup."
+                )
         data_dir = Path(data_dir)
 
         model_preset = kwargs.get("af2_model_preset", "monomer")
         db_preset = kwargs.get("af2_db_preset", "reduced_dbs")
 
-        from predict_structure.config import get_command
         cmd = [
             *get_command("alphafold"),
             "--fasta_paths", str(input_path),

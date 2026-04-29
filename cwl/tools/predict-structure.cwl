@@ -66,6 +66,23 @@ hints:
     cudaVersionMin: "11.8"
     cudaDeviceCountMin: 1
     cudaDeviceCountMax: 1
+  gowe:Execution:
+    executor: worker
+    gpu: true
+  gowe:ResourceData:
+    datasets:
+      - id: boltz
+        path: /local_databases/boltz
+        size: 50GB
+        mode: cache
+      - id: chai
+        path: /local_databases/chai
+        size: 30GB
+        mode: cache
+      - id: openfold
+        path: /local_databases/openfold
+        size: 10GB
+        mode: cache
 
 baseCommand: [predict-structure]
 
@@ -395,11 +412,12 @@ inputs:
       valueFrom: |
         ${
           if (inputs.tool === "alphafold") {
-            return self;
+            if (self) { return self; }
+            return "/local_databases/alphafold/databases";
           }
           return null;
         }
-    doc: "AlphaFold2 database directory (~2TB) [default: /databases]"
+    doc: "AlphaFold2 database directory [default: /local_databases/alphafold/databases]"
 
   af2_model_preset:
     type: string?
@@ -569,6 +587,24 @@ outputs:
     outputBinding:
       glob: "$(inputs.output_dir)/confidence.json"
     doc: "Confidence scores (pLDDT, pTM, per-residue)"
+
+  results:
+    type: File?
+    outputBinding:
+      glob: "$(inputs.output_dir)/results.json"
+    doc: "Summary + file manifest (sha256, size) for downstream pipelines"
+
+  ro_crate:
+    type: File?
+    outputBinding:
+      glob: "$(inputs.output_dir)/ro-crate-metadata.json"
+    doc: "RO-Crate 1.1 Process Run Crate provenance (best-effort)"
+
+  reports:
+    type: Directory?
+    outputBinding:
+      glob: "$(inputs.output_dir)/report"
+    doc: "Characterization reports (report.html/json/pdf) from protein_compare"
 
 stdout: predict-structure.log
 stderr: predict-structure.err

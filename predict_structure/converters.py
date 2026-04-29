@@ -7,6 +7,7 @@ formats (mmCIF ↔ PDB).
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
@@ -16,6 +17,13 @@ from typing import TYPE_CHECKING
 import yaml
 from Bio import SeqIO
 from Bio.PDB import MMCIFParser, MMCIFIO, PDBParser, PDBIO
+
+# OpenFold 3 only recognizes MSA files with basenames from its aln_order list
+# (see its dataset_config_components.py). We stage user-provided MSAs with
+# this name so OpenFold loads them. Other recognized names: uniref90_hits,
+# mgnify_hits, bfd_uniref_hits, etc. colabfold_main is the generic single-MSA
+# slot.
+OPENFOLD3_MSA_BASENAME = "colabfold_main"
 
 if TYPE_CHECKING:
     from predict_structure.entities import EntityList
@@ -256,6 +264,12 @@ def entities_to_boltz_yaml(
             entry["sequence"] = entity.value
             if msa_path is not None:
                 entry["msa"] = str(msa_path.resolve())
+            else:
+                # Single-sequence mode: Boltz requires an explicit msa field
+                # for protein chains. Setting "empty" avoids the error
+                # "Missing MSA's in input and --use_msa_server flag not set"
+                # at the cost of reduced prediction accuracy.
+                entry["msa"] = "empty"
             sequences.append({"protein": entry})
 
         elif entity.entity_type == EntityType.DNA:
@@ -386,9 +400,18 @@ def entities_to_openfold_json(
     Raises:
         ValueError: If a GLYCAN entity is present (unsupported by OpenFold 3).
     """
-    import json
-
     from predict_structure.entities import EntityType
+
+    # Stage MSA files with a recognized basename so OpenFold's aln_order
+    # accepts them. Prefer symlink (cheap for large MSAs, identical chains
+    # can share the source); fall back to copy on symlink failure
+    # (cross-device mounts, Windows without privileges, etc.).
+    msa_staging_dir: Path | None = None
+    if msa_path is not None:
+        msa_staging_dir = output_path.parent / "msa_staging"
+        msa_staging_dir.mkdir(parents=True, exist_ok=True)
+        msa_source = msa_path.resolve()
+        msa_ext = msa_path.suffix.lower() or ".a3m"
 
     chains = []
     for entity in entity_list:
@@ -405,8 +428,26 @@ def entities_to_openfold_json(
         if entity.entity_type == EntityType.PROTEIN:
             chain["molecule_type"] = "protein"
             chain["sequence"] = entity.value
-            if msa_path is not None:
-                chain["main_msa_file_paths"] = [str(msa_path.resolve())]
+            if msa_path is not None and msa_staging_dir is not None:
+                chain_msa_dir = msa_staging_dir / f"chain_{entity.chain_id}"
+                chain_msa_dir.mkdir(exist_ok=True)
+                staged = chain_msa_dir / f"{OPENFOLD3_MSA_BASENAME}{msa_ext}"
+                # Remove any existing entry at the staged path to guarantee
+                # we never copy *through* a stale symlink into the user's
+                # original MSA file.
+                if staged.is_symlink() or staged.exists():
+                    staged.unlink()
+                try:
+                    staged.symlink_to(msa_source)
+                except OSError:
+                    # Cross-device, unsupported FS, or no symlink privilege.
+                    # follow_symlinks=False ensures we write to `staged` even
+                    # if something re-creates it as a symlink before we copy.
+                    shutil.copy2(str(msa_source), str(staged),
+                                 follow_symlinks=False)
+                # Keep the staged basename -- OpenFold infers MSA type from it,
+                # so we must not resolve back to the user's original filename.
+                chain["main_msa_file_paths"] = [str(staged.absolute())]
         elif entity.entity_type == EntityType.DNA:
             chain["molecule_type"] = "dna"
             chain["sequence"] = entity.value

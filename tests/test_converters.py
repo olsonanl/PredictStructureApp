@@ -247,7 +247,14 @@ class TestEntitiesToOpenFoldJson:
         data = json.loads(out.read_text())
         chains = data["queries"]["prediction"]["chains"]
         assert "main_msa_file_paths" in chains[0]
-        assert str(sample_a3m) in chains[0]["main_msa_file_paths"][0]
+        # OpenFold 3 requires recognized MSA filenames (from aln_order).
+        # The converter stages the file as colabfold_main.<ext>.
+        staged_path = chains[0]["main_msa_file_paths"][0]
+        assert "colabfold_main" in staged_path
+        assert staged_path.endswith(sample_a3m.suffix)
+        # Verify staged file exists and matches original content
+        from pathlib import Path
+        assert Path(staged_path).read_text() == sample_a3m.read_text()
 
     def test_no_msa_server(self, protein_entity_list, tmp_output):
         from predict_structure.converters import entities_to_openfold_json

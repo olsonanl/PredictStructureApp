@@ -54,6 +54,11 @@ use Bio::KBase::AppService::AppScript;
 $ENV{P3_LOG_LEVEL} //= 'INFO';
 
 my $script = Bio::KBase::AppService::AppScript->new(\&run_app, \&preflight);
+# Opt out of the framework's automatic result-folder creation. It would
+# create <output_path>/.<output_file>/ (or <output_path>/ with no
+# output_file), which makes p3-cp -r on upload nest our results under an
+# extra <output>/ subdir. We manage the upload path ourselves.
+$script->donot_create_result_folder(1);
 $script->run(\@ARGV);
 
 # ---------------------------------------------------------------------------
@@ -179,11 +184,70 @@ Main execution function:
 
 =cut
 
+sub _expand_ws_placeholders {
+    # Replace ${WS_HOME} / ${WS_USER} in `$text` using the workspace user
+    # parsed from the auth token. Keeps params files portable across users.
+    #
+    # Token sources, in order:
+    #   1. $KB_AUTH_TOKEN env var
+    #   2. $P3_TOKEN env var
+    #   3. $PATRIC_TOKEN_PATH file
+    #   4. ~/.patric_token
+    my ($text) = @_;
+    return $text unless defined $text and $text =~ /\$\{WS_/;
+
+    my $token = $ENV{KB_AUTH_TOKEN} // $ENV{P3_TOKEN} // "";
+    if (!$token) {
+        my @paths = (
+            $ENV{PATRIC_TOKEN_PATH},
+            ($ENV{HOME} ? "$ENV{HOME}/.patric_token" : undef),
+        );
+        for my $p (@paths) {
+            next unless $p and -f $p;
+            local $/;
+            open(my $fh, "<", $p) or next;
+            $token = <$fh>;
+            close $fh;
+            chomp $token if defined $token;
+            last if $token;
+        }
+    }
+
+    my $user;
+    for my $part (split /\|/, $token) {
+        if ($part =~ /^un=(.+)$/) {
+            $user = $1;
+            last;
+        }
+    }
+    unless ($user) {
+        warn "Cannot expand \${WS_*} placeholders -- no auth token found ",
+             "(checked KB_AUTH_TOKEN, P3_TOKEN, PATRIC_TOKEN_PATH, ~/.patric_token)\n";
+        return $text;
+    }
+    my $home = "/$user/home";
+    $text =~ s/\$\{WS_HOME\}/$home/g;
+    $text =~ s/\$\{WS_USER\}/$user/g;
+    return $text;
+}
+
+
 sub run_app {
     my ($app, $app_def, $raw_params, $params) = @_;
 
     print "Starting PredictStructure service\n";
     print STDERR "Parameters: " . Dumper($params) . "\n" if $ENV{P3_DEBUG};
+
+    # Expand ${WS_HOME} / ${WS_USER} placeholders in workspace-bound
+    # params so committed params files don't have to bake in a
+    # specific user. Same expansion happens client-side in
+    # scripts/instantiate_params.py and the pytest fixtures; doing it
+    # here too means manual `perl App-PredictStructure.pl ... params.json`
+    # invocations work without preprocessing.
+    for my $key (qw(output_path input_file msa_file)) {
+        $params->{$key} = _expand_ws_placeholders($params->{$key})
+            if defined $params->{$key};
+    }
 
     # Create working directories
     my $work_dir = $ENV{P3_WORKDIR} // $ENV{TMPDIR} // "/tmp";
@@ -275,22 +339,46 @@ sub run_app {
     run_report($output_dir);
 
     # -----------------------------------------------------------------
+    # 3b. Finalize results.json + ro-crate-metadata.json
+    # -----------------------------------------------------------------
+    # Delegate to the Python CLI so sha256/manifest logic stays in one
+    # place. This also relocates report.html/.json/.pdf into report/ for
+    # the unified layout. Non-fatal if it fails -- prediction artifacts
+    # still upload.
+    my $bin = find_predict_structure_binary();
+    my $fin_rc = system($bin, "finalize-results", $output_dir);
+    if ($fin_rc != 0) {
+        print STDERR "Warning: finalize-results failed (rc="
+            . ($fin_rc >> 8) . "); continuing with upload\n";
+    }
+
+    # -----------------------------------------------------------------
     # 4. Upload results to workspace
     # -----------------------------------------------------------------
 
-    my $output_folder = $app->result_folder();
-    die "Could not get result folder from app framework\n" unless $output_folder;
+    # We called donot_create_result_folder(1), so the framework's
+    # result_folder() is undef. Upload directly to the user-supplied
+    # output_path (the user/test is already providing a versioned path).
+    my $output_folder = $app->result_folder()
+        // $params->{output_path}
+        // die "No output_path in params and framework result_folder unset\n";
 
-    # Clean up trailing slashes/dots
+    # Clean up trailing slashes/dots in case the caller supplied them.
     $output_folder =~ s/\/+$//;
     $output_folder =~ s/\/\.$//;
 
-    # Create unique subfolder
-    my $output_base = $params->{output_file} // "predict_structure_result";
-    my $timestamp = POSIX::strftime("%Y%m%d_%H%M%S", localtime);
-    my $task_id = $app->{task_id} // "unknown";
-    my $run_folder = "${output_base}_${timestamp}_${task_id}";
-    $output_folder = "$output_folder/$run_folder";
+    # By default results are uploaded flat into $output_folder so the
+    # caller controls the final layout (typically via a versioned
+    # output_path). Set P3_DEBUG_RUN_SUBFOLDER=1 to nest each run under a
+    # timestamped subfolder (useful when debugging multiple runs sharing
+    # one output_path).
+    if ($ENV{P3_DEBUG_RUN_SUBFOLDER}) {
+        my $output_base = $params->{output_file} // "predict_structure_result";
+        my $timestamp = POSIX::strftime("%Y%m%d_%H%M%S", localtime);
+        my $task_id = $app->{task_id} // "unknown";
+        my $run_folder = "${output_base}_${timestamp}_${task_id}";
+        $output_folder = "$output_folder/$run_folder";
+    }
 
     print "Uploading results to workspace: $output_folder\n";
     upload_results($app, $output_dir, $output_folder);
@@ -454,13 +542,23 @@ sub run_report {
         return;
     }
 
-    my $report_dir = "$output_dir/report";
-    make_path($report_dir);
+    # protein_compare characterize uses -o as a filename PREFIX and writes
+    # <prefix>.html / <prefix>.json / <prefix>.pdf (not a directory). Use
+    # "<output_dir>/report" so the files land as report.html / report.json
+    # / report.pdf alongside the prediction artifacts.
+    my $report_prefix = "$output_dir/report";
+
+    # Use the predict-structure conda env's python (has protein_compare),
+    # not whatever 'python' is first on PATH (PATRIC runtime python lacks it).
+    my $bin = find_predict_structure_binary();
+    my $python = $bin;
+    $python =~ s{/predict-structure$}{/python};
+    $python = "python" unless -x $python;
 
     my @cmd = (
-        "python", "-m", "protein_compare", "characterize",
+        $python, "-m", "protein_compare", "characterize",
         $model_pdb,
-        "-o", $report_dir,
+        "-o", $report_prefix,
         "--format", "all",
     );
 
@@ -511,6 +609,15 @@ sub download_workspace_file {
     my $basename = basename($ws_path);
     my $local_path = "$local_dir/$basename";
 
+    # If the path is local-readable inside the container (acceptance
+    # tests bind-mount fixtures at /data, /tmp, etc.), copy directly.
+    # BV-BRC workspace paths look like /<user>@<domain>/... which never
+    # exist as local files, so this is unambiguous.
+    if (-f $ws_path) {
+        copy($ws_path, $local_path) or die "Local copy failed: $!\n";
+        return $local_path;
+    }
+
     if ($app && $app->can('workspace')) {
         try {
             $app->workspace->download_file($ws_path, $local_path, 1);
@@ -518,12 +625,7 @@ sub download_workspace_file {
             die "Failed to download $ws_path: $_\n";
         };
     } else {
-        # Fallback for testing without workspace connection
-        if (-f $ws_path) {
-            copy($ws_path, $local_path) or die "Copy failed: $!\n";
-        } else {
-            die "File not found: $ws_path\n";
-        }
+        die "File not found: $ws_path (no workspace connection)\n";
     }
 
     return $local_path;
@@ -549,9 +651,9 @@ sub upload_results {
         '--map-suffix' => "png=png",
         '--map-suffix' => "svg=svg",
         '--map-suffix' => "csv=csv",
-        '--map-suffix' => "fasta=protein_feature_fasta",
-        '--map-suffix' => "fa=protein_feature_fasta",
-        '--map-suffix' => "faa=protein_feature_fasta",
+        '--map-suffix' => "fasta=contigs",
+        '--map-suffix' => "fa=contigs",
+        '--map-suffix' => "faa=feature_protein_fasta",
     );
 
     my @cmd = ("p3-cp", "--overwrite", "-r", @mapping, $local_dir, "ws:$ws_path");
