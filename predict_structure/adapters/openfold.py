@@ -25,7 +25,7 @@ class OpenFoldAdapter(BaseAdapter):
       - Input is JSON (not FASTA/YAML) — requires entities_to_openfold_json()
       - Built-in ColabFold MSA server (--use-msa-server, default True)
       - Rich confidence: pLDDT, PAE, PDE, pTM, ipTM, ranking score
-      - Requires 32GB+ GPU VRAM (A100 class)
+      - Requires 32GB+ GPU VRAM (V100 class)
     """
 
     tool_name: str = "openfold"
@@ -158,6 +158,6 @@ class OpenFoldAdapter(BaseAdapter):
             "policy_data": {
                 "gpu_count": 1,
                 "partition": "gpu2",
-                "constraint": "A100|H100|H200",
+                "constraint": "V100|H100|H200",
             },
         }

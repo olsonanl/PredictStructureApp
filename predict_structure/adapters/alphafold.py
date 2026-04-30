@@ -153,6 +153,6 @@ class AlphaFoldAdapter(BaseAdapter):
             "policy_data": {
                 "gpu_count": 1,
                 "partition": "gpu2",
-                "constraint": "A100|H100|H200",
+                "constraint": "V100|H100|H200",
             },
         }
