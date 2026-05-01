@@ -152,7 +152,7 @@ class OpenFoldAdapter(BaseAdapter):
     def preflight(self) -> dict[str, Any]:
         return {
             "cpu": 8,
-            "memory": "96G",
+            "memory": "200G",
             "runtime": 14400,
             "storage": "50G",
             "policy_data": {
